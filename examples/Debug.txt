@@ -1,0 +1,10 @@
+
+\ this is debug test
+: deb	DUP + . ;
+
+
+: XX2	DUP	1 >	IF	
+				111
+			THEN ;
+
+

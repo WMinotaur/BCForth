@@ -1,9 +1,9 @@
 
-cmake*
+#cmake*
 build/
 !build/ReadMe.txt
 
-examples/
+#examples/
 icon/
 doc/
 
