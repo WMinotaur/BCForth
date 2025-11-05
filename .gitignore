@@ -1,0 +1,13 @@
+
+cmake*
+build/
+!build/ReadMe.txt
+
+examples/
+icon/
+doc/
+
+*/*.jpg
+
+ToDo.txt
+

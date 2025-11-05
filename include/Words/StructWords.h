@@ -13,6 +13,8 @@
 
 
 #include "Words.h"
+#include <iostream>
+#include <cassert>
 
 
 
@@ -30,6 +32,9 @@ namespace BCForth
 	public:
 
 		StructuralWord( Base & f ) : TWord< Base >( f ) {}
+		
+		StructuralWord( StructuralWord && ) = default;
+		StructuralWord & operator = ( StructuralWord && ) = default;
 
 	public:
 
@@ -49,30 +54,60 @@ namespace BCForth
 		using WordPtr	= typename Base::WordPtr;
 		using WordsVec	= std::vector< WordPtr >;
 
+		using StructuralWord< Base >::GetForth;
+
 	private:
 
 		WordsVec		fWordsVec;
 
 	public:
 
-		CompoWord( Base & f ) : StructuralWord< Base >( f ) {}
+		CompoWord( Base & f ) : StructuralWord< Base >( f )
+		{ fWordsVec.reserve( kCompoWord_VecInitReserveSize ); }
+
+		CompoWord( CompoWord && cw )
+			:  StructuralWord< Base >( cw.GetForth() ),
+				fWordsVec( std::move( cw.fWordsVec ) ), fWordsDebugInfoVec( std::move( cw.fWordsDebugInfoVec ) )
+		{
+			//fWordsVec = std::move( cw.fWordsVec );
+			//fWordsDebugInfoVec = std::move( cw.fWordsDebugInfoVec );		
+		}
+
+		CompoWord & operator = ( CompoWord && cw )
+		{
+			fWordsVec = std::move( cw.fWordsVec );
+			fWordsDebugInfoVec = std::move( cw.fWordsDebugInfoVec );
+			return * this;
+		}
+
+
+	private:
+
+		using WordsDebugInfoVec	= std::vector< DebugFileInfo >;
+
+		WordsDebugInfoVec		fWordsDebugInfoVec;
+
 
 	public:
 
-		void AddWord( WordPtr wp ) { assert( wp ); fWordsVec.push_back( wp ); }
+		const WordsDebugInfoVec	& GetWordsDebugInfoVec() { return fWordsDebugInfoVec; }
 
-		WordsVec &			GetWordsVec( void )			{ return fWordsVec; }
-		const WordsVec &	GetWordsVec( void ) const	{ return fWordsVec; }
+
+		void AddWord( WordPtr wp, DebugFileInfo dfi = DebugFileInfo() ) 
+		{ 
+			assert( wp ); 
+			fWordsVec.push_back( wp ); 
+			fWordsDebugInfoVec.emplace_back( dfi );
+		}
+
+
+		[[nodiscard]] WordsVec &				GetWordsVec( void )			{ return fWordsVec; }
+		[[nodiscard]] const WordsVec &		GetWordsVec( void ) const	{ return fWordsVec; }
 
 	public:
-
 
 		// Execute all
-		void operator () ( void ) override
-		{
-			for( const auto op : fWordsVec )
-				( * op )();
-		}
+		void operator () ( void ) override;
 
 	};
 
@@ -106,8 +141,8 @@ namespace BCForth
 
 	public:
 
-		CW &	GetTrueNode( void )		{ return fTrueBranch; }
-		CW &	GetFalseNode( void )	{ return fFalseBranch; }
+		[[nodiscard]] CW &	GetTrueNode( void )		{ return fTrueBranch; }
+		[[nodiscard]] CW &	GetFalseNode( void )	{ return fFalseBranch; }
 
 	public:
 
@@ -171,14 +206,13 @@ namespace BCForth
 
 		CW	fBodyNodes;
 
-
 		SignedIntType		fIndex {};
 
 	public:
 
-		CW &	GetBodyNodes( void ) { return fBodyNodes; }
+		[[nodiscard]] CW &			GetBodyNodes( void ) { return fBodyNodes; }
 
-		SignedIntType	GetIndex( void ) const { return fIndex; }
+		[[nodiscard]] SignedIntType	GetIndex( void ) const { return fIndex; }
 
 	public:
 
@@ -194,7 +228,7 @@ namespace BCForth
 			{
 
 				fIndex						= static_cast< SignedIntType >( initial );
-				const SignedIntType kTo		= static_cast< SignedIntType >( limit );
+				const SignedIntType kTo	= static_cast< SignedIntType >( limit );
 
 				SignedIntType step_val {};
 
@@ -207,7 +241,7 @@ namespace BCForth
 						if( typename DataStack::value_type	s {}; ds.Pop( s ) )
 							step_val = static_cast< SignedIntType >( s );
 						else
-							throw ForthError( "unexpectedly empty stack" );
+							throw ForthError( "unexpectedly empty stack when processing DO" );
 
 						assert( step_val != 0 );		// otherwise the loop is infinite
 						fIndex += step_val;
@@ -224,11 +258,40 @@ namespace BCForth
 			}
 			else
 			{
-				throw ForthError( "unexpectedly empty stack" );
+				throw ForthError( "unexpectedly empty stack when processing DO" );
 			}
 		}
 
 	};
+
+
+	// ?DO loop
+	template < typename Base >
+	class QDO_LOOP : public DO_LOOP< Base >
+	{
+		using DataStack = typename Base::DataStack;
+		using TWord< Base >::GetDataStack;
+
+
+	public:
+
+		QDO_LOOP( Base & f ) : DO_LOOP< Base >( f ) {}
+
+	public:
+
+		void operator () ( void ) override
+		{
+			auto & ds { GetDataStack() };	
+			if( const auto ds_size = ds.size(); ds_size < 2 )
+				throw ForthError( "unexpectedly empty stack when processing ?DO" );
+			else if( const auto ds_data = ds.data(); ds_data[ ds_size - 1 ] != ds_data[ ds_size - 2 ] )
+				DO_LOOP< Base >::operator() ();		// call the base
+		}
+
+	};
+
+
+
 
 
 	// Loop index node 
@@ -318,8 +381,8 @@ namespace BCForth
 
 	public:
 
-		CW &	Get_Begin_Nodes( void ) { return fBegin_Nodes; }
-		CW &	Get_While_Nodes( void ) { return fWhile_Nodes; }
+		[[nodiscard]] CW &	Get_Begin_Nodes( void ) { return fBegin_Nodes; }
+		[[nodiscard]] CW &	Get_While_Nodes( void ) { return fWhile_Nodes; }
 
 
 		enum class EBeginLoopType { kAgain, kUntil, kWhileRepeat, kExit };
@@ -458,8 +521,8 @@ namespace BCForth
 
 	public:
 
-		CW &	GetCreationNode( void )		{ return fCreationBranch; }
-		CW &	GetBehaviorNode( void )		{ return fBehaviorBranch; }
+		[[nodiscard]] CW &	GetCreationNode( void )		{ return fCreationBranch; }
+		[[nodiscard]] CW &	GetBehaviorNode( void )		{ return fBehaviorBranch; }
 
 	public:
 

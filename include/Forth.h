@@ -35,7 +35,6 @@
 
 
 
-
 namespace BCForth
 {
 
@@ -58,11 +57,12 @@ namespace BCForth
 
 		using RetStack = TStackFor< CellType, kStackMaxCells >;
 
+
 	public:
 
-		DataStack &	GetDataStack( void ) { return fDataStack; }			
+		[[nodiscard]] DataStack &	GetDataStack( void ) { return fDataStack; }			
 
-		RetStack &	GetRetStack( void ) { return fRetStack; }	
+		[[nodiscard]] RetStack &	GetRetStack( void ) { return fRetStack; }	
 
 
 	public:
@@ -79,10 +79,12 @@ namespace BCForth
 		{
 			WordUP	fWordUP;
 			bool	fWordIsCompiled		: 1		{ false };		// set if a word is currently compiled 
-			bool	fWordIsImmediate	: 1		{ false };		// set if a word is immediate (executed during compilation of other words)
+			bool	fWordIsImmediate		: 1		{ false };		// set if a word is immediate (executed during compilation of other words)
 			bool	fWordIsDefining		: 1		{ false };		// set if a word contains DOES> in its definition
-			Name	fWordComment;								// commenting text of this word
+			Name	fWordComment;											// commenting text of this word
 			// reserved for further data
+
+			DebugFileInfo			fDebugFileInfo;					// a field only in the debug version, stores info on token position in the source file
 		};
 
 		using WordOptional = std::optional< WordEntry * >;
@@ -97,10 +99,10 @@ namespace BCForth
 
 		DataStack		fDataStack;			// the main Forth's data structure
 
-		RetStack		fRetStack;			// the second stack, called a "return" stack in Forth frameworks
-											// (not used, left only for user's convenience)
+		RetStack			fRetStack;			// the second stack, called a "return" stack in Forth frameworks
+													// (not used, left only for user's convenience)
 
-		WordDict		fWordDict;			// a dictionary with all Forth's words
+		WordDict			fWordDict;			// a dictionary with all Forth's words
 
 
 	protected:
@@ -128,24 +130,39 @@ namespace BCForth
 		WordDict &	GetWordDict( void ) { return fWordDict; }
 
 
-		// Returns false if the word already exists
-		WordPtr InsertWord_2_Dict( Name name, WordUP wp, Name comment_str = "", bool compiled = false, bool immediate = false, bool defining = false )
+		// Returns a non-owning ptr to the just inserted word
+		WordPtr InsertWord_2_Dict( const Name & name, WordUP wp, Name comment_str = "", bool compiled = false, bool immediate = false, bool defining = false, DebugFileInfo dif = DebugFileInfo() )
 		{
 			WordPtr retPtr { wp.get() };
-			fWordDict[ name ] = WordEntry( std::move( wp ), compiled, immediate, defining, comment_str );
+
+			if constexpr( FORTH_IS_CASE_INSENSITIVE )
+				fWordDict[ ToUpper( name ) ] = WordEntry { std::move( wp ), compiled, immediate, defining, comment_str, dif };
+
+			else
+				fWordDict[ name ] = WordEntry { std::move( wp ), compiled, immediate, defining, comment_str, dif };
+				
 			return retPtr;
 		}
 
 	public:
 
 		// Get the word's entry but the word can be not present
-		auto GetWordEntry( const Name & word_name )
+		[[nodiscard]] auto GetWordEntry( const Name & word_name )
 		{
 
-			if( const auto & word = fWordDict.find( word_name ); word != fWordDict.end() )
-				return WordOptional( & word->second );
+			if constexpr( FORTH_IS_CASE_INSENSITIVE )
+
+				if( const auto & word = fWordDict.find( ToUpper( word_name ) ); word != fWordDict.end() )
+					return WordOptional( & word->second );
+				else
+					return WordOptional();
+
 			else
-				return WordOptional();
+
+				if( const auto & word = fWordDict.find( word_name ); word != fWordDict.end() )
+					return WordOptional( & word->second );
+				else
+					return WordOptional();
 		}
 
 
@@ -162,6 +179,7 @@ namespace BCForth
 		{
 			return EIntCompBase::kDec;		// in the base only this, will be extended in the interpreter
 		}
+
 
 	};
 

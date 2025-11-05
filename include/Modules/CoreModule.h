@@ -15,7 +15,7 @@
 
 #include "Modules.h"
 
-
+#include <ranges>
 
 
 
@@ -79,7 +79,7 @@ namespace BCForth
 
 
 
-			forth_comp.InsertWord_2_Dict( "CR",		std::make_unique< DotQuote< TForth > >( forth_comp, forth_comp.GetOutStream(), kCR ) );
+			forth_comp.InsertWord_2_Dict( "CR",		std::make_unique< DotQuote< TForth > >( forth_comp, forth_comp.GetOutStream(), Name( kCR ) ) );
 			forth_comp.InsertWord_2_Dict( "TAB",	std::make_unique< DotQuote< TForth > >( forth_comp, forth_comp.GetOutStream(), Letter_2_Name( kTab ) ) );
 			forth_comp.InsertWord_2_Dict( "SPACE",	std::make_unique< DotQuote< TForth > >( forth_comp, forth_comp.GetOutStream(), Letter_2_Name( kSpace ) ) );
 
@@ -119,11 +119,14 @@ namespace BCForth
 			
 			forth_comp.InsertWord_2_Dict( "@",		std::make_unique< ExGenericStackOp< TForth, [] ( auto & ds ) { return ds.template ReadAt< CellType >();  }	 > >( forth_comp ), " addr -- [addr] " );
 			forth_comp.InsertWord_2_Dict( "!",		std::make_unique< ExGenericStackOp< TForth, [] ( auto & ds ) { return ds.template WriteAt< CellType >();  }	 > >( forth_comp ), " x addr -- " );
+			forth_comp.InsertWord_2_Dict( "+!",		std::make_unique< ExGenericStackOp< TForth, [] ( auto & ds ) { return ds.template UpdateAt< CellType >();  }	 > >( forth_comp ), " n addr -- " );
 
 			forth_comp.InsertWord_2_Dict( "C@",		std::make_unique< ExGenericStackOp< TForth, [] ( auto & ds ) { return ds.template ReadAt< Char >();  }	 > >( forth_comp ), " c_addr -- [c_addr] " );
 			forth_comp.InsertWord_2_Dict( "C!",		std::make_unique< ExGenericStackOp< TForth, [] ( auto & ds ) { return ds.template WriteAt< Char >();  }	 > >( forth_comp ), " c c_addr -- " );
-			forth_comp.InsertWord_2_Dict( "C+!",	std::make_unique< ExGenericStackOp< TForth, [] ( auto & ds ) { return ds.template UpdateAt< Char >();  } > >( forth_comp ), " c c_addr -- " );
+			forth_comp.InsertWord_2_Dict( "C+!",	std::make_unique< ExGenericStackOp< TForth, [] ( auto & ds ) { return ds.template UpdateAt< Char >();  } > >( forth_comp ), " n c_addr -- " );
 
+			forth_comp.InsertWord_2_Dict( "2@",		std::make_unique< ExGenericStackOp< TForth, [] ( auto & ds ) { return ds.template DoubleReadAt< CellType >();  }	 > >( forth_comp ), " addr -- [addr] [addr+1] " );
+			forth_comp.InsertWord_2_Dict( "2!",		std::make_unique< ExGenericStackOp< TForth, [] ( auto & ds ) { return ds.template DoubleWriteAt< CellType >();  }	 > >( forth_comp ), " x1 x2 addr -- " );
 
 
 			forth_comp.InsertWord_2_Dict( "1+",		std::make_unique< ExGenericStackOp< TForth, [] ( auto & ds ) { return ds.template OnePlus< SignedIntType >();  } > >( forth_comp ), " x -- x+1 " );
@@ -151,9 +154,11 @@ namespace BCForth
 			{ 
 				std::vector< std::tuple< Name, Name, Name > >		name_comm_vec;
 				for( const auto & [ n, w ] : forth_comp.GetWordDict() )
-					name_comm_vec.push_back( std::make_tuple( n, w.fWordComment, w.fWordIsImmediate ? " [immediate]" : "" ) );
-				std::sort( name_comm_vec.begin(), name_comm_vec.end() );
-				std::for_each( name_comm_vec.begin(), name_comm_vec.end(), [ & forth_comp ] ( const auto & t ) { forth_comp.GetOutStream() << std::get<0>( t ) << "\t\t\t" << std::get<1>( t ) << "\t\t\t\t\t" << std::get<2>( t ) << std::endl; } );
+					name_comm_vec./*push_back*/emplace_back( std::make_tuple( n, w.fWordComment, w.fWordIsImmediate ? " [immediate]" : "" ) );
+				//std::sort( name_comm_vec.begin(), name_comm_vec.end() );
+				std::ranges::sort( name_comm_vec );
+				//std::for_each( name_comm_vec.begin(), name_comm_vec.end(), [ & forth_comp ] ( const auto & t ) { forth_comp.GetOutStream() << std::get<0>( t ) << "\t\t\t" << std::get<1>( t ) << "\t\t\t\t\t" << std::get<2>( t ) << std::endl; } );
+				std::ranges::for_each( name_comm_vec, [ & forth_comp ] ( const auto & t ) { forth_comp.GetOutStream() << std::get<0>( t ) << "\t\t\t" << std::get<1>( t ) << "\t\t\t\t\t" << std::get<2>( t ) << std::endl; } );
 			} ), " -- " );
 
 
@@ -172,11 +177,12 @@ namespace BCForth
 	class CoreDefinedWords : public DirectTextModule
 	{
 		  
-		const Name & kBL			{ ": BL ( -- space_char ) " + std::to_string( kSpace ) + " ;" };	  
+		const Name /*&*/ kBL				{ ": BL ( -- space_char ) " + std::to_string( kSpace ) + " ;" };	  
 			  
-		const Name & kFALSE_Const	{ std::to_string( kBoolFalse ) + " CONSTANT FALSE" };
-		const Name & kTRUE_Const	{ std::to_string( kBoolTrue ) + " CONSTANT TRUE" };
+		const Name /*&*/ kFALSE_Const	{ std::to_string( kBoolFalse ) + " CONSTANT FALSE" };
+		const Name /*&*/ kTRUE_Const		{ std::to_string( kBoolTrue ) + " CONSTANT TRUE" };
 
+		//const Name			kDebugFileNameWord { ": " + Name( kDebugFileName ) + " S\" BCForthDebugInfoFile.txt\" ;" };
 
 	public:
 
@@ -320,6 +326,17 @@ namespace BCForth
 
 					"DEC",					// turn decimal on entry
 
+
+
+					//"VARIABLE DEBUGGER",		// define a variable to turn DEBUGGER on and off
+
+					//": DEBUGGER_OFF 0 DEBUGGER ! ;",			
+					//": DEBUGGER_ON  1 DEBUGGER ! ;",		
+
+					//"DEBUGGER_OFF",					// turn DEBUGGER off on entry
+
+					//": DebugFileName S\" BCForthDebugInfoFile.txt\" ;",
+					//kDebugFileNameWord,
 
 					kFALSE_Const,
 					kTRUE_Const,

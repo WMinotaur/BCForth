@@ -145,7 +145,7 @@ namespace BCForth
 			//
 			forth_comp.InsertWord_2_Dict( "ACCEPT",	std::make_unique< StackOp< TForth, CellType, Char *, CellType > >( forth_comp, 
 
-				[ & forth_comp ] ( const auto addr, const auto maxLen ) 
+				[ /*& forth_comp*/ ] ( const auto addr, const auto maxLen ) 
 				{ 
 					std::cin.get( addr, maxLen + 1, kCR[ 0 ] );	// Reads at most count-1 == maxLen chars and stores them in the buffer at addr, until '\n' is found.
 					auto reaLen { std::cin.gcount() };			// '\n' is not extracted from the input sequence

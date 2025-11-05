@@ -12,6 +12,9 @@
 #pragma once
 
 
+#include <iostream>
+#include <format>
+//#include <fmt/format.h>
 
 #include "Forth.h"
 #include "SystemWords.h"
@@ -44,7 +47,7 @@ namespace BCForth
 
 	public:
 
-		auto & GetOutStream( void ) { return fOutStream; }
+		[[nodiscard]] auto & GetOutStream( void ) { return fOutStream; }
 
 
 	protected:
@@ -70,23 +73,31 @@ namespace BCForth
 		// - IO operations: . (dot), .", "
 		// - CONSTANT and VARIABLE
 
+	protected:
+
+		RawByte ReadVariable( const Name & variable_name )
+		{
+			if( const auto base_word_entry = GetWordEntry( variable_name ) )												// if exists, variable_name is a Forth's variable
+				if( auto * we = dynamic_cast< CompoWord< TForth > * >( (*base_word_entry)->fWordUP.get() ) )			// each Forth's word contains a CompoWord
+					if( auto & compo_vec = we->GetWordsVec(); compo_vec.size() > 0 )											// The CompoWord should contain sub-words
+						if( auto * byte_arr = dynamic_cast< RawByteArray< Base > * >( compo_vec[ 0 ] ) )					// For the variable this has to be RawByteArray
+								return byte_arr->GetContainer()[ 0 ];
+
+
+			return RawByte();			// this is the default value
+		}
+
+
 	public:
 
 		EIntCompBase ReadTheBase( void ) override
 		{
-			if( auto base_word_entry = GetWordEntry( "BASE" ) )														// if exists, BASE is a Forth's variable
-				if( auto * we = dynamic_cast< CompoWord< TForth > * >( (*base_word_entry)->fWordUP.get() ) )		// each Forth's word contains a CompoWord
-					if( auto & compo_vec = we->GetWordsVec(); compo_vec.size() > 0 )								// The CompoWord should contain sub-words
-						if( auto * byte_arr = dynamic_cast< RawByteArray< Base > * >( compo_vec[ 0 ] ) )			// For the variable this has to be RawByteArray
-								return byte_arr->GetContainer()[ 0 ] == 16 ? EIntCompBase::kHex : EIntCompBase::kDec;
-
-
-			return EIntCompBase::kDec;			// this is the default value
+			return ReadVariable( "BASE" ) == 16 ? EIntCompBase::kHex : EIntCompBase::kDec;
 		}
 
 	protected:
 
-		auto Word_2_Integer( const Name & word )
+		[[nodiscard]] auto Word_2_Integer( const Name & word )
 		{
 			try
 			{
@@ -99,7 +110,7 @@ namespace BCForth
 		}
 
 
-		bool IsInteger( const Name & n, EIntCompBase expected_base )
+		[[nodiscard]] bool IsInteger( const Name & n, EIntCompBase expected_base )
 		{
 			switch( expected_base )
 			{
@@ -112,22 +123,24 @@ namespace BCForth
 		}
 
 
-		bool IsFloatingPt( const Name & n )
+		[[nodiscard]] bool IsFloatingPt( const Name & n )
 		{
 			return std::regex_match( n, kFloatPtVal );
 		}
 
 
 
-		void Erase_n_First_Words( Names & ns, const Names::size_type to_remove )
+		template < typename T >
+		void Erase_n_First_Words( T & ns, const Names::size_type to_remove )
 		{
 			ns.erase( ns.begin(), ns.begin() + to_remove );
 		}
 
+
 	protected:
 
 
-		auto ExtractTextFromTokenUpToSubstr( const Name & n, const Name::size_type pos, const Letter letter )
+		[[nodiscard]] auto ExtractTextFromTokenUpToSubstr( const Name & n, const Name::size_type pos, const Letter letter )
 		{
 			assert( n.length() > pos && n[ pos ] == letter );
 			return n.substr( 0, pos );
@@ -136,7 +149,7 @@ namespace BCForth
 
 
 		// Allows for recursive (nested) enclosings
-		auto CollectTextUpToTokenContaining( Names & ns, const Letter enter_letter, const Letter close_letter )
+		[[nodiscard]] auto CollectTextUpToTokenContaining( /*Names*/TokenStream & ns, const Letter enter_letter, const Letter close_letter )
 		{
 			Name str;
 
@@ -145,7 +158,7 @@ namespace BCForth
 
 			while( ns.size() > 0 )
 			{
-				const auto token { ns[ 0 ] };		// at each iteration take the first word
+				const auto token { ns[ 0 ].fName };		// at each iteration take the first word
 				Erase_n_First_Words( ns, 1 );		// immediately, remove from the stream
 
 				if( const auto pos = ContainsSubstrAt( token, enter_letter ) ; pos != Name::npos )
@@ -162,7 +175,8 @@ namespace BCForth
 						// a closing symbol found - split, left attach, right treat as a new token
 						const auto & [ s0, s1 ] = SplitAt( token, pos + 1 );		
 						str += s0;
-						ns.insert( ns.begin(), s1 );	// insert new token to the stream
+						//ns.insert( ns.begin(), s1 );	// insert new token to the stream
+						ns.insert( ns.begin(), Token { s1/*, DebugFileInfo()*/ } );	// insert new token to the stream
 					}
 
 				}
@@ -202,40 +216,40 @@ namespace BCForth
 
 		// Process and consume the processed words (i.e. these will be erased from the input stream)
 		// ns will be modified
-		virtual void ProcessContextSequences( Names & ns )
+		virtual void ProcessContextSequences( TokenStream & ns )
 		{
 			const auto kNumNames { ns.size() };
 			if( kNumNames == 0 )
 				return;
 
-			auto & leadName { ns[ 0 ] };
+			auto & leadName { ns[ 0 ].fName };
 
 
-			// FIND DROP
-			if( leadName == "FIND" )
+			// e.g. FIND DROP
+			if( CheckMatch( leadName, kFIND ) )
 			{
 				// There should be a following name for that word
 				if( kNumNames <= 1 )
 					throw ForthError( "Syntax missing word name" );
 
-				if( auto word_entry = GetWordEntry( ns[ 1 ] ); word_entry )
-					cout << "Word " << ns[ 1 ] << " found ==> ( " << ( * word_entry )->fWordComment << " )" << ( ( * word_entry )->fWordIsImmediate ? "\t\timmediate" : "" ) << endl;
+				if( auto word_entry = GetWordEntry( ns[ 1 ].fName ); word_entry )
+					cout << "Word " << ns[ 1 ].fName << " found ==> ( " << ( * word_entry )->fWordComment << " )" << ( ( * word_entry )->fWordIsImmediate ? "\t\timmediate" : "" ) << endl;
 				else
-					cout << "Unknown word " << ns[ 1 ] << endl;
+					cout << "Unknown word " << ns[ 1 ].fName << endl;
 
 				Erase_n_First_Words( ns, 2 );
 				return;
 			}
 
 
-			// ' DUP
-			if( leadName == "'" )
+			// e.g. ' DUP
+			if( CheckMatch( leadName, kTick ) )
 			{
 				// There should be a following name for that variable
 				if( kNumNames <= 1 )
 					throw ForthError( "Syntax missing variable name" );
 
-				Tick< TForth >( * this, ns[ 1 ] )();
+				Tick< TForth >( * this, ns[ 1 ].fName )();
 
 				Erase_n_First_Words( ns, 2 );
 				return;
@@ -244,14 +258,14 @@ namespace BCForth
 
 
 			// This one goes like this:
-			// 234 TO CUR_FUEL
-			if( leadName == "TO" )
+			// e.g. 234 TO CUR_FUEL
+			if( CheckMatch( leadName, kTO ) )
 			{
 				// There should be a following name for that variable
 				if( kNumNames <= 1 )
 					throw ForthError( "Syntax missing variable name" );
 
-				To< TForth >( * this, ns[ 1 ] )();
+				To< TForth >( * this, ns[ 1 ].fName )();
 
 				Erase_n_First_Words( ns, 2 );
 				return;
@@ -259,13 +273,13 @@ namespace BCForth
 
 
 			// Parse the following word and put ASCII code of its first char onto the stack
-			if( leadName == "CHAR" )
+			if( CheckMatch( leadName, kCHAR ) )
 			{
 				// There should be a following name for that variable
 				if( kNumNames <= 1 )
 					throw ForthError( "Syntax CHAR should be followed by a text" );
 
-				GetDataStack().Push( BlindValueReInterpretation< Char >( ns[ 1 ][ 0 ] ) );
+				GetDataStack().Push( BlindValueReInterpretation< Char >( ns[ 1 ].fName[ 0 ] ) );
 
 				Erase_n_First_Words( ns, 2 );
 				return;
@@ -274,7 +288,7 @@ namespace BCForth
 
 			// Constructions to enter the counted string (i.e. len-chars), e.g.:
 			// CREATE	AGH		,"	University of Science and Technology"
-			if( leadName == kCommaQuote )
+			if( CheckMatch( leadName, kCommaQuote ) )
 			{
 				// Just entered the number of tokens up to the closing "
 
@@ -292,27 +306,61 @@ namespace BCForth
 			// CREATE DATA  100 CHARS ALLOT
 			// CREATE CELL-DATA  100 CELLS ALLOT
 			// CREATE TWOS 2 , 4 , 8 , 16 ,
-			if( leadName == "CREATE" )
+			if( CheckMatch( leadName, kCREATE ) )
 			{
-				leadName = ns[ 0 ] = "[CREATE]";	// just exchange CREATE into [CREATE] and business as usual
+				leadName = ns[ 0 ].fName = kB_CREATE_B;	// just exchange CREATE into [CREATE] and business as usual
 			}
-
-
 
 		}
 
 
 		// The main entry to the Forth's INTERPRETER
-		virtual void ExecuteWords( Names && ns )
+		virtual void ExecuteWords( TokenStream && ns )
 		{
-
-			ProcessContextSequences( ns );
-
-			const auto kNumNames { ns.size() };
-			if( kNumNames == 0 )
+			if( ns.size() == 0 )
 				return;
 
-			const auto & word { ns[ 0 ] };
+			auto & word { ns[ 0 ].fName };
+
+
+#if DEBUG_ON
+
+			// -----------------
+			// Debugger on & off
+			if( CheckMatch( word, kDEBUGGER ) )
+			{
+				// Next thing to determine is "ON" or "OFF"
+				if( ns.size() <= 1 )
+					throw ForthError( "Missing 'ON' or 'OFF' in DEBUGGER command" );
+
+				if( const auto & name = ns[ 1 ].fName; CheckMatch( name, kON ) )
+					SetDebugMode( true );		
+				else
+					if( CheckMatch( name, kOFF ) )
+						SetDebugMode( false );	
+					else
+						throw ForthError( "Missing 'ON' or 'OFF' in DEBUGGER command" );
+
+				Erase_n_First_Words( ns, 2 );
+
+				return;
+			}
+			// -----------------
+
+			CallDebugWord( word, ns[ 0 ].fDebugFileInfo );				// otherwise, take the current token debug context
+
+#endif // DEBUG_ON
+
+
+
+
+			ProcessContextSequences( ns );			// moved here on Sept 13th '23 - ProcessContextSequences also returns on an empty ns
+
+			// ProcessContextSequences can check length of ns
+			if( ns.size() == 0 )
+				return;
+
+			word = ns[ 0 ].fName;
 
 
 			if( IsInteger( word, ReadTheBase() ) )
@@ -350,7 +398,7 @@ namespace BCForth
 			}
 			else
 			{
-				throw ForthError( "unknown word - " + word );
+				throw ForthError( "unknown word - " + word, false );
 			}
 
 		}
@@ -360,7 +408,7 @@ namespace BCForth
 
 
 		// The one created with DOES>
-		virtual bool ProcessDefiningWord( const Name & word_name, const Names & ns )
+		virtual bool ProcessDefiningWord( const Name & word_name, const TokenStream & ns )
 		{
 			// First, check if this is a defining word
 			if( auto word_entry = GetWordEntry( word_name ); word_entry && (*word_entry)->fWordIsDefining )
@@ -404,7 +452,7 @@ namespace BCForth
 							if( ! IsEmpty( does_wrd->GetBehaviorNode() ) )
 								definedWordPtr->AddWord( & does_wrd->GetBehaviorNode() );	// (2) Connect the behavioral branch, as already pre-defined in the defining word
 
-							InsertWord_2_Dict( ns[ 1 ], std::move( definedWord ) );		// Now we have fully created new word in the dictionary		
+							InsertWord_2_Dict( ns[ 1 ].fName, std::move( definedWord ), Name( kDOES_G ) + word_name, false, false, false, ns[ 1 ].fDebugFileInfo );		// Now we have fully created new word in the dictionary		
 
 							return true;
 						}
@@ -416,9 +464,7 @@ namespace BCForth
 				}
 				
 				
-
 				assert( false );		// should not happen, all words are at least of CompoWord type or derived
-
 
 			}
 
@@ -435,22 +481,193 @@ namespace BCForth
 
 
 		// Process a stream of tokens
-		virtual void operator() ( Names && ns )
+		virtual void operator() ( TokenStream && ns )
 		{
-			ExecuteWords( std::move( ns ) );
+			ExecuteWords( std::move( ns ) );							
+			CallDebugWord();				// otherwise, take the current token debug context
 		}
 
 	public:
 
 		// It clears the data and return stacks - should be called in the catch 
-		virtual void CleanUpAfterRunTimeError( void )
+		virtual void CleanUpAfterRunTimeError( bool must_clear_stacks )
 		{
-			GetDataStack().clear();
-			GetRetStack().clear();	
+			if( must_clear_stacks )
+				GetDataStack().clear(), GetRetStack().clear();	
 		}
 
 
+	public:
+
+#if DEBUG_ON
+
+		// -------------
+		// DEBUG members
+
+
+		[[nodiscard]] auto IsDebug()
+		{
+			return GetDebugMode();
+		}
+
+
+		Name GetDebugFileName()
+		{
+			// At first - invoke the word "DebugFileName"
+			// This will leave addr and len on the stack			
+			// Then create and return a string
+			if( DataStack::value_type x {}, y {}; ExecWord( Name( kDebugFileName ) ) && fDataStack.Pop( y ) && fDataStack.Pop( x ) )
+				return Name( reinterpret_cast< Letter * >( x ), y );
+			else
+				return Name( kDefaultDebugFileName );
+		}
+
+		void CallDebugWord( const Name & word_name = "", const DebugFileInfo & debug_file_info = DebugFileInfo() )
+		{
+			if( ! IsDebug() )
+				return;
+
+			auto [ lnCol, fIdx ] = debug_file_info;
+			auto [ ln, col ] = lnCol;
+			auto fileName = fIdx != kSourceFileIndexSentinel ? fSourceFilesMap[ fIdx ].string() : "";
+
+			if( fileName.size() > 0 )
+			{
+				std::ofstream outDebugFile( GetDebugFileName() );
+				if( outDebugFile.is_open() )
+					outDebugFile << fileName << "\n" << ln << " " << col;
+			}
+
+			//fOutStream << "\nTo exec >> " << word_name << " @ (" << ln << "," << col << "," << fileName << ")" << "\nStack dump: ";
+			fOutStream << std::format( "\nTo exec >> {}  @ ({},{})\nStack dump: ", word_name, ln, col, fileName );
+			fOutStream << "(c) cont, (s) signd st.dump & cont, (d) unsignd st.dump & cont, (x) stop debug & cont, (a) abort: ";
+
+
+			auto stack_dump_lambda = [ this ]( auto DispTypeDummy ) 
+			{
+				const auto ds { GetDataStack().data() };
+				const auto base { ReadTheBase() };
+				fOutStream << std::setbase( base ) << ( base == EIntCompBase::kDec ? std::noshowbase : std::showbase );
+				std::transform( ds, ds + GetDataStack().size(),	std::ostream_iterator< decltype( DispTypeDummy ) >( fOutStream, " " ), 
+										[] ( const auto & v ) { return BlindValueReInterpretation< decltype( DispTypeDummy ) >( v ); } );
+				fOutStream << std::endl;
+			};
+
+
+			switch( char c {}; std::cin >> c, c )
+			{
+				case 's': case 'S':
+
+					stack_dump_lambda( SignedIntType() );
+					break;
+
+				case 'd': case 'D':
+
+					stack_dump_lambda( CellType() );
+					break;
+
+				case 'x': case 'X':
+
+					SetDebugMode( false );
+					break;			
+					
+				case 'a': case 'A':
+
+					throw ForthError( "DEBUGGING aborted by a user" );
+					break;
+
+				default:
+					break;
+			}
+
+ 		}
+
+
+
+		[[nodiscard]] auto	GetWordEntryAndNameFromWordAddress( const WordPtr p )
+		{
+			if( auto pos = std::find_if(	fWordDict.begin(), fWordDict.end(), 
+													[ p ] ( const auto & m ) { return m.second.fWordUP.get() == p; } ); 
+						pos != fWordDict.end() )
+				return std::tuple( WordOptional( & pos->second ), pos->first );
+			else 
+				return std::tuple( WordOptional(), Name() );
+		}
+
+
+		[[nodiscard]] Name	GetNameFromWordAddress( const WordPtr p ) const
+		{
+			if( auto pos = std::find_if(	fWordDict.begin(), fWordDict.end(), 
+													[ p ] ( const auto & m ) { return m.second.fWordUP.get() == p; } ); 
+						pos != fWordDict.end() )
+				return pos->first;
+			else 
+				return Name();
+		}
+
+	private:
+
+
+		bool					fDebugMode_On { false };			// if true, then we are in the debug mode
+
+		SourceFilesMap		fSourceFilesMap;
+
+		//Name					fDebugFileName { "BCForthDebugInfoFile.txt" };		// a file to post debug information to the outside world
+
+
+	public:
+
+		[[nodiscard]] SourceFilesMap &	GetSourceFilesMap() { return fSourceFilesMap; }
+
+		void							SetDebugMode( bool v ) { fDebugMode_On = v; }
+		[[nodiscard]] bool		GetDebugMode() const { return fDebugMode_On; }
+
+
+#else
+
+
+		void CallDebugWord( const Name & word_name = "", const DebugFileInfo & debug_file_info = DebugFileInfo() )
+		{
+		}
+
+
+
+#endif
+
+
+
 	};
+
+
+
+
+	template < typename Base >
+	void CompoWord< Base >::operator () ( void )
+	{
+#if DEBUG_ON
+		if( auto & theInterpreter = dynamic_cast< TForthInterpreter & >( GetForth() ); theInterpreter.IsDebug() && fWordsDebugInfoVec.size() == fWordsVec.size() )
+		{
+			if( const auto [ word_entry_opt, name ] { theInterpreter.GetWordEntryAndNameFromWordAddress( this ) }; word_entry_opt )
+				theInterpreter.CallDebugWord( name, (*word_entry_opt)->fDebugFileInfo );
+
+
+			for( int i {}; i < std::ssize( fWordsVec ); ++ i )
+			{
+				const auto op = fWordsVec[ i ];
+
+				( * op )();
+
+				theInterpreter.CallDebugWord( theInterpreter.GetNameFromWordAddress( op ), fWordsDebugInfoVec[ i ] );
+			}
+
+		}
+		else
+#endif // DEBUG_ON
+		{
+			for( const auto op : fWordsVec )
+				( * op )();
+		}
+	}
 
 
 

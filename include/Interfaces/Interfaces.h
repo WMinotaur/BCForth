@@ -23,6 +23,7 @@
 #include "RandModule.h"
 #include "TimeModule.h"
 
+#include "FiberRoutines.h"
 
 
 
@@ -43,12 +44,12 @@ namespace BCForth
 
 	// This is called before the Forth interpreter
 	// to check and take action on system words
-	bool SystemProcessTokens( TForthCompiler & , const Names & , bool & );
+	bool SystemProcessTokens( TForthCompiler & , const /*Names*/TokenStream & , bool & );
 
 
 	const Name kWelcomeString { R"(==========================================
 Welcome to the Forth interpreter-compiler
-Written by Prof. Boguslaw Cyganek (C) 2021
+Written by Prof. Boguslaw Cyganek (C) 2023
 ==========================================
 )" };
 
@@ -62,6 +63,8 @@ All operations on the stack in the Reverse Polish Notation
 
 
 
+
+
 	void Run( void )
 	{
 		std::cout << kWelcomeString;
@@ -70,7 +73,7 @@ All operations on the stack in the Reverse Polish Notation
 		bool exit_flag { false };
 
 		TForthCompiler	F_compiler;
-		TForthReader	theReader;
+		// /*TForthReader*/TForthReader_4_Debugging	theReader;
 
 
 
@@ -96,21 +99,38 @@ All operations on the stack in the Reverse Polish Notation
 
 			try 
 			{
+				auto terminal_input_index { SourceFileIndex::GetUniqueFileId() };
+#if DEBUG_ON
+				F_compiler.GetSourceFilesMap()[ terminal_input_index ] = "Terminal";
+				TForthReader_4_Debugging	theReader( terminal_input_index );
+#else
+				TForthReader theReader;
+#endif
+
 				while( ! exit_flag )
 				{
 					std::cout << "\nOK:" << std::endl;
+
 
 					auto tokens { theReader( std::cin ) };
 
 					if( SystemProcessTokens( F_compiler, tokens, exit_flag ) == false )
 						F_compiler( std::move( tokens ) );	
 
+					// --------------------------
+					// Process coro scheduler
+					ProcessCoros();
+
 				}
 			}
 			catch( const ForthError & err )
 			{
-				F_compiler.CleanUpAfterRunTimeError();
+				F_compiler.CleanUpAfterRunTimeError( false );
 				std::cerr << "\nError: " << err.what() << endl;		// after this kind of errors we proceed	
+			}
+			catch( const std::exception & std_excpt )
+			{
+				std::cerr << "\nStandard error: " << std_excpt.what() << endl;		// after this kind of errors we proceed	
 			}
 			catch( ... )
 			{
@@ -130,14 +150,18 @@ All operations on the stack in the Reverse Polish Notation
 
 
 
-	bool SystemProcessTokens( TForthCompiler & F_compiler, const Names & ns, bool & exit_flag )
+	bool SystemProcessTokens( TForthCompiler & F_compiler, const TokenStream & ns, bool & exit_flag )
 	{
 		if( ns.size() == 0 )
 			return false;			// nothing to do, exiting
 
-		exit_flag = false;			// exit? not yet
+		exit_flag = false;		// exit? not yet
 
-		const auto & str = ns[ 0 ];
+
+		Name str = ns[ 0 ].fName;		
+		if constexpr( FORTH_IS_CASE_INSENSITIVE )
+			str = ToUpper( ns[ 0 ].fName );
+
 
 		// -------------------------------------------------------------------------------
 		// Some special words have to break the "normal" operation of the Forth's compiler
@@ -159,8 +183,15 @@ All operations on the stack in the Reverse Polish Notation
 			{
 				if( std::ifstream fs( forth_source ); fs )
 				{
+#if DEBUG_ON
+					const auto file_index { SourceFileIndex::GetUniqueFileId() };
+					F_compiler.GetSourceFilesMap() [ file_index ] = forth_source;
+					for( TForthReader_4_Debugging fileReader( file_index ); fs; F_compiler( fileReader( fs ) ) ) 
+						;
+#else
 					for( TForthReader fileReader; fs; F_compiler( fileReader( fs ) ) ) 
 						;
+#endif
 
 					std::cout << "File processed OK\n" << endl;
 				}

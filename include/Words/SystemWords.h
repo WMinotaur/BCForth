@@ -34,7 +34,7 @@ namespace BCForth
 	class Tick : public TWord< Base >
 	{
 		using TWord< Base >::GetDataStack;
-		using TWord< Base >::WordPtr;
+		using typename TWord< Base >::WordPtr;
 		using TWord< Base >::GetForth;
 
 
@@ -93,7 +93,7 @@ namespace BCForth
 	class To : public TWord< Base >
 	{
 		using TWord< Base >::GetDataStack;
-		using TWord< Base >::WordPtr;
+		using typename TWord< Base >::WordPtr;
 		using TWord< Base >::GetForth;
 
 		using DataStack = typename Base::DataStack;
@@ -258,7 +258,7 @@ namespace BCForth
 	class Allot : public TWord< Base >
 	{
 		using TWord< Base >::GetDataStack;
-		using TWord< Base >::WordPtr;
+		using typename TWord< Base >::WordPtr;
 		using TWord< Base >::GetForth;
 
 
