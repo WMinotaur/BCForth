@@ -28,90 +28,10 @@ namespace BCForth
 
 
 
-
-
-// The IO reader
-//template < bool CaseInsensitive = FORTH_IS_CASE_INSENSITIVE >
-class TForthReader
-{
-
-	// Some grep definitions
-
-
-public:
-
-	virtual ~TForthReader() = default;			// we'll derive from it
-
-protected:
-
-
-	Name StripEndingComment( Name & ln )
-	{
-		if( auto pos = ln.find( kBackSlash ); pos != Name::npos )
-			ln.erase( ln.begin() + pos, ln.end() );
-
-		return ln;
-	}
-
-
-public:
-
-
-	// Read a line or lines and return the names
-	virtual TokenStream operator() ( std::istream & i )
-	{
-
-		Name lines;
-
-		// This is a simple state machine:
-		//		Take the first line and check if it begins with the colon (i.e. it is a word definition);
-		//			If so, then read all lines up and including the one that contains a semicolon (i.e. a word end).
-		//		If no colon, then it is a word call
-
-
-		if( Name ln; std::getline( i, ln ) )
-		{
-			lines = StripEndingComment( ln );
-
-			if( auto pos = ln.find_first_not_of( kBlanks ); pos != Name::npos && ln[ pos ] == kColon )
-				while( ln.find( kSemColon, pos ) == Name::npos && std::getline( i, ln )  )		// read new lines until a one with ; is found
-					lines += Name( kCR ) + StripEndingComment( ln );		// add CR since getline swallows it
-
-		}
-
-
-
-		// We need to do the following steps:
-		// (1)	Iterate through all strings (i.e. token names) provided by the std::sregex_token_iterator
-		// (2)	Pass only those that are not empty strings
-		// (3)	Transform each string to a Token object
-		// (4)	Create and return a vector of such Tokens
-
-		assert( sizeof( Token ) == sizeof( Token::fName ) );			// This is to tell that in the non-debug mode each token is just a string, nothing more
-
-		// Create a range from a pair of iterators (actually - a subrange)
-		// "-1" represents the parts that are not matched (e.g, the stuff between matches)
-		auto tok_names = std::ranges::subrange( std::sregex_token_iterator( lines.cbegin(), lines.cend(), kBlanksRe, -1 ), std::sregex_token_iterator() );
-
-		return	tok_names	| std::ranges::views::filter( [] ( const auto & s ) { return s.length() > 0; } )		// std::ranges::views == std::views
-									| std::ranges::views::transform( [] ( const auto & a ) { return Token { a }; } )
-									| std::ranges::to< TokenStream >();
-
-	}
-
-
-
-
-};
-
-
-
-
-
-
 #if DEBUG_ON
 
 
+// Wersja debugująca czytnika
 class TForthReader_4_Debugging
 {
 
@@ -140,6 +60,16 @@ protected:
 		Letter right { p < std::ssize( str )-1 ? str[ p+1 ] : kSpace }; 
 		return ( left == kSpace || left == kTab ) && ( right == kSpace || right == kTab );
 	}
+
+
+    Name StripEndingComment( Name & ln )
+	{
+		if( auto pos = ln.find( kBackSlash ); pos != Name::npos )
+			ln.erase( ln.begin() + pos, ln.end() );
+
+		return ln;
+	}
+
 
 public:
 
@@ -219,6 +149,11 @@ public:
 						// we allows words such as "BUFFER:"
 						if( IsSeparateSymbol( ln, colCnt ) )
 						{
+                            if( !tokName.empty() )
+                            {
+                                outTokenStream.emplace_back( Token { std::move( tokName ), { { fTotalCharCounter - static_cast<int>(tokName.size()), static_cast<int>(tokName.size()) }, fSourceFileIndex } } );
+                                tokName.clear();
+                            }
 							outTokenStream.emplace_back( Token { Letter_2_Name( kColon ), { { fTotalCharCounter, 1 }, fSourceFileIndex } } );
 							enterDefinition = true;
 						}
@@ -233,6 +168,11 @@ public:
 
 						if( IsSeparateSymbol( ln, colCnt ) )
 						{
+                             if( !tokName.empty() )
+                            {
+                                outTokenStream.emplace_back( Token { std::move( tokName ), { { fTotalCharCounter - static_cast<int>(tokName.size()), static_cast<int>(tokName.size()) }, fSourceFileIndex } } );
+                                tokName.clear();
+                            }
 							assert( fTotalCharCounter > 0 );
 							outTokenStream.emplace_back( Token { Letter_2_Name( kSemColon ), { { fTotalCharCounter, 1 }, fSourceFileIndex } } );
 							enterDefinition = false;
@@ -257,24 +197,69 @@ public:
 		return outTokenStream; 
 
 	}
+};
 
 
+using TForthReader = TForthReader_4_Debugging;
 
 
+#else
 
+// Wersja bez debugowania (oryginalna)
+class TForthReader_Release
+{
+
+public:
+
+	virtual ~TForthReader_Release() = default;
+
+protected:
+
+
+	Name StripEndingComment( Name & ln )
+	{
+		if( auto pos = ln.find( kBackSlash ); pos != Name::npos )
+			ln.erase( ln.begin() + pos, ln.end() );
+
+		return ln;
+	}
+
+
+public:
+
+
+	virtual TokenStream operator() ( std::istream & i )
+	{
+
+		Name lines;
+
+		if( Name ln; std::getline( i, ln ) )
+		{
+			lines = StripEndingComment( ln );
+
+			if( auto pos = ln.find_first_not_of( kBlanks ); pos != Name::npos && ln[ pos ] == kColon )
+				while( ln.find( kSemColon, pos ) == Name::npos && std::getline( i, ln )  )
+					lines += Name( kCR ) + StripEndingComment( ln );
+
+		}
+
+		assert( sizeof( Token ) == sizeof( Token::fName ) );
+
+		auto tok_names = std::ranges::subrange( std::sregex_token_iterator( lines.cbegin(), lines.cend(), kBlanksRe, -1 ), std::sregex_token_iterator() );
+
+		return	tok_names	| std::ranges::views::filter( [] ( const auto & s ) { return s.length() > 0; } )
+									| std::ranges::views::transform( [] ( const auto & a ) { return Token { a }; } )
+									| std::ranges::to< TokenStream >();
+
+	}
 
 };
+
+using TForthReader = TForthReader_Release;
+
 
 #endif
 
 
 
-
-
-
-
 }	// The end of the BCForth namespace
-
-
-
-
