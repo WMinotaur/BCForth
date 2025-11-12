@@ -51,6 +51,7 @@ namespace BCForth
 
 
 
+
 	// The TWord objects are organized as a composite DP
 	// See my book: Introduction to Programming with C++ for Engineers, Wiley 2021
 
@@ -64,12 +65,11 @@ namespace BCForth
 		using WordPtr = typename Base::WordPtr;
 
 
-	protected:
+	public:
 
+		[[nodiscard]] auto & GetDataStack( void ) { return fForth.GetDataStack(); }
 
-		auto & GetDataStack( void ) { return fForth.GetDataStack(); }
-
-		auto & GetForth( void ) { return fForth; }
+		[[nodiscard]] auto & GetForth( void ) { return fForth; }
 
 	public:
 
@@ -93,6 +93,25 @@ namespace BCForth
 		//
 		virtual void operator () ( void ) = 0;
 
+
+	protected:
+
+
+		// Some data for DEBUGGING - in the debug mode each
+		// word is associated with a source file, as well as the line and column positions
+		//SourceFileIndex		fSourceFile_Index {};
+		//LnCol						fSourceFile_LnCol {};
+	//	DebugFileInfo			fDebugFileInfo;
+
+	//public:
+
+
+	//	const DebugFileInfo & GetDebugFileInfo() { return fDebugFileInfo; }
+
+	//	void SetDebugFileInfo( const DebugFileInfo & dfi ) { fDebugFileInfo = dfi; }
+	//	void SetDebugFileInfo(       DebugFileInfo && dfi ) { fDebugFileInfo = dfi; }
+
+
 	};
 
 
@@ -110,10 +129,12 @@ namespace BCForth
 
 
 		std::function< bool ( DataStack & ) >	fStackOp;
+		//using Fun = std::function< bool ( DataStack & ) >;
+		//Fun fStackOp;
 
 	public:
 
-		GenericStackOp( Base & f, auto u_op ) : TWord< Base >( f ), fStackOp( u_op ) {}
+		GenericStackOp( Base & f, auto/*Fun*/ u_op ) : TWord< Base >( f ), fStackOp( u_op ) {}
 
 	public:
 
@@ -179,10 +200,13 @@ namespace BCForth
 
 
 		std::function< RetType () >	fOp;
+		//using Fun = std::function< RetType () >;
+		//Fun fOp;
+
 
 	public:
 
-		StackOp( Base & f, auto u_op ) : TWord< Base >( f ), fOp( u_op ) {}
+		StackOp( Base & f, auto/*Fun*/ u_op ) : TWord< Base >( f ), fOp( u_op ) {}
 
 	public:
 
@@ -209,10 +233,12 @@ namespace BCForth
 
 
 		std::function< RetType ( Arg_x ) >	fOp;
+		//using Fun = std::function< RetType ( Arg_x ) >;
+		//Fun fOp;
 
 	public:
 
-		StackOp( Base & f, auto u_op ) : TWord< Base >( f ), fOp( u_op ) {}
+		StackOp( Base & f, auto/*Fun*/ u_op ) : TWord< Base >( f ), fOp( u_op ) {}
 
 	public:
 
@@ -245,10 +271,12 @@ namespace BCForth
 
 
 		std::function< RetType ( Arg_x, Arg_y ) >	fOp;
+		//using Fun = std::function< RetType ( Arg_x, Arg_y ) >;
+		//Fun fOp;
 
 	public:
 
-		StackOp( Base & f, auto u_op ) : TWord< Base >( f ), fOp( u_op ) {}
+		StackOp( Base & f, auto/*Fun*/ u_op ) : TWord< Base >( f ), fOp( u_op ) {}
 
 	public:
 
@@ -287,7 +315,7 @@ namespace BCForth
 
 	public:
 
-		Stack_Dump( Base & f, std::ostream & o, Name sep = Name( 1, kSpace ), Name endMark = kCR ) 
+		Stack_Dump( Base & f, std::ostream & o, Name sep = Name( 1, kSpace ), Name endMark = Name( kCR ) ) 
 			: TWord< Base >( f ), fOutStream( o ), fSeparator( sep ), fEndMark( endMark ) {}
 
 	public:
@@ -330,8 +358,8 @@ namespace BCForth
 
 	public:
 
-		value_type	GetVal( void ) const { return fData; }
-		void		SetVal( value_type v ) { fData = v; }
+		[[nodiscard]] value_type	GetVal( void ) const { return fData; }
+		void						SetVal( value_type v ) { fData = v; }
 
 
 	public:
@@ -479,12 +507,20 @@ namespace BCForth
 
 
 		std::function< bool ( const Name &, DataStack & ) >	fQuoteOp;
+		//using Fun = std::function< bool ( const Name &, DataStack & ) >;	// This is a way around to fix the problem with auto in MSVC compiler
+		//Fun fQuoteOp;
+
 
 		Name		fText;
 
 	public:
 
-		QuoteSuite( Base & f, Name s, auto u_op ) : TWord< Base >( f ), fText( s ), fQuoteOp( u_op ) {}
+		// Here is the problem with the latest MSVC compiler 16.9 - the culprit is "auto" in the construcot,
+		// not even being passed a lambda, but even with a simple 10, that is "int", it fails to recognize f as a valid base class.
+		// However, this still compiles with gcc ...
+		QuoteSuite( Base & f, Name s, auto u_op ) : TWord< Base >( f ), fQuoteOp( u_op ), fText( s ) {}
+		//QuoteSuite( Base & f, Name s, /*Fun*/auto u_op ) : TWord< Base >( f ), fQuoteOp( u_op ), fText( s ) {}
+
 
 	public:
 
@@ -529,7 +565,7 @@ namespace BCForth
 	public:
 
 
-		ContainerType & GetContainer( void ) { return fContainer; }
+		[[nodiscard]] ContainerType & GetContainer( void ) { return fContainer; }
 
 
 	public:

@@ -16,7 +16,10 @@
 #include <string>
 #include <vector>
 #include <regex>
-
+#include <map>
+#include <filesystem>
+#include <ranges>
+#include <string_view>
 
 
 namespace BCForth
@@ -28,14 +31,15 @@ namespace BCForth
 	using std::vector;
 
 
+	using namespace std::string_view_literals;	// Use this to avoid "MSVC: warning C4455: 'operator ""sv': literal suffix identifiers that do not start with an underscore are reserved"
+	//using std::operator""sv;
 
 
-
-	using CellType	= size_t;
+	using CellType	= unsigned long long;
 	using RawByte	= unsigned char;
 	using Char		= char;
 
-	using size_type = size_t;
+	using size_type = unsigned long long;
 
 	using SignedIntType = long long;		// it is good and efficient to have the SignedIntType 
 											// the same length as the basic CellType (otherwise e.g. address
@@ -70,6 +74,10 @@ namespace BCForth
 	// 8 kB for the PAD temporary storage area
 	inline const size_type k_PAD_Size { 8 * 1024 };
 
+	// Each CompoWord stores a std::vector with its words - this is the initial size to reserve for these vectors
+	constexpr size_type kCompoWord_VecInitReserveSize { 16 };		
+
+
 
 
 	using Name = std::string;			// maybe std::wstring in the future?
@@ -78,33 +86,82 @@ namespace BCForth
 	using Letter = Name::value_type;
 
 
-	constexpr	const Letter kSpace		{ ' ' };
-	constexpr	const Letter kTab		{ '\t' };
-				const Name kCR			{ "\n" };
+	constexpr	Letter	kSpace		{ ' ' };
+	constexpr	Letter	kTab			{ '\t' };
+	constexpr	auto		kCR			= "\n"sv;
 
-	constexpr	const Letter kColon		{ ':' };
-	constexpr	const Letter kSemColon	{ ';' };
-
-
-	constexpr	const Letter kLeftParen		{ '(' };
-	constexpr	const Letter kRightParen	{ ')' };
-	constexpr	const Letter kBackSlash		{ '\\' };
+	constexpr	Letter kColon		{ ':' };
+	constexpr	Letter kSemColon	{ ';' };
 
 
-				const Name kBlanks { " \t\n" };
+	constexpr	Letter kLeftParen		{ '(' };
+	constexpr	Letter kRightParen	{ ')' };
+	constexpr	Letter kBackSlash		{ '\\' };
 
 
-				const std::regex kBlanksRe { "[[:s:]]+" }; // any whitespace, one or more times
+	constexpr auto kBlanks { " \t\n"sv };
 
-				const Name		kDotQuote	{ ".\"" };
+
+	const std::regex kBlanksRe { "[[:s:]]+" }; // any whitespace, one or more times
+
+	constexpr auto					kDotQuote	{ ".\""sv };
 	constexpr	const Letter	kQuote		{ '\"' };
 
-				const Name		kAbortQuote	{ "ABORT\"" };
-				const Name		kCommaQuote	{ ",\"" };
-				const Name		kSQuote		{ "S\"" };
-				const Name		kCQuote		{ "C\"" };
+	constexpr auto		kAbortQuote	{ "ABORT\""sv };
+	constexpr auto		kCommaQuote	{ ",\""sv };
+	constexpr auto		kSQuote		{ "S\""sv };
+	constexpr auto		kCQuote		{ "C\""sv };
 
 	constexpr	const Letter kPlus			{ '+' };
+
+
+
+	constexpr auto		kDEBUGGER		{ "DEBUGGER"sv };		// a word that takes on two values: "ON" or "OFF" to turn debugger on and off, respectively
+	constexpr auto		kON				{ "ON"sv };
+	constexpr auto		kOFF				{ "OFF"sv };
+	constexpr auto		kDebugFileName	{ "DebugFileName"sv };	// a word that defines a string constant with a debug file name, e.g.
+																				// : DebugFileName S" BCForthDebugInfoFile.txt" ;
+																				// This can be redefined by a user
+	constexpr auto		kDefaultDebugFileName	{ "BCForthDebugInfoFile.txt"sv };
+
+
+	constexpr auto		kFIND				{ "FIND"sv };
+	constexpr auto		kTick				{ "'"sv };
+	constexpr auto		kTO				{ "TO"sv };
+	constexpr auto		kCHAR				{ "CHAR"sv };
+	constexpr auto		kCREATE			{ "CREATE"sv };
+	constexpr auto		kB_CREATE_B		{ "[CREATE]"sv };
+
+	constexpr auto		kIF				{ "IF"sv };
+	constexpr auto		kELSE				{ "ELSE"sv };
+	constexpr auto		kTHEN				{ "THEN"sv };
+	constexpr auto		kDO				{ "DO"sv };
+	constexpr auto		kQDO				{ "?DO"sv };
+	constexpr auto		kLOOP				{ "LOOP"sv };
+	constexpr auto		kPLOOP			{ "+LOOP"sv };
+	constexpr auto		kI					{ "I"sv };
+	constexpr auto		kJ					{ "J"sv };
+	constexpr auto		kBEGIN			{ "BEGIN"sv };
+	constexpr auto		kAGAIN			{ "AGAIN"sv };
+	constexpr auto		kWHILE			{ "WHILE"sv };
+	constexpr auto		kREPEAT			{ "REPEAT"sv };
+	constexpr auto		kUNTIL			{ "UNTIL"sv };				
+	constexpr auto		kEXIT				{ "EXIT"sv };
+	constexpr auto		kCASE				{ "CASE"sv };
+	constexpr auto		kOF				{ "OF"sv };
+	constexpr auto		kENDOF			{ "ENDOF"sv };
+	constexpr auto		kENDCASE			{ "ENDCASE"sv };
+	constexpr auto		kB_TICK_B		{ "[']"sv };
+	constexpr auto		kLB				{ "["sv };
+	constexpr auto		kRB				{ "]"sv };				
+	constexpr auto		kPOSTPONE		{ "POSTPONE"sv };
+	constexpr auto		kLITERAL			{ "LITERAL"sv };
+	constexpr auto		kDOES_G			{ "DOES>"sv };
+	constexpr auto		kB_CHAR_B		{ "[CHAR]"sv };
+	constexpr auto		kCO_RANGE		{ "CO_RANGE"sv };      // the only one limitation is the only one delimiter char here
+	constexpr auto		kCO_FIBER		{ "CO_FIBER"sv };      // the only one limitation is the only one delimiter char here
+	constexpr auto		kIMMEDIATE		{ "IMMEDIATE"sv };				
+
 
 
 
@@ -119,35 +176,38 @@ namespace BCForth
 
 	// Does simple re-interpretation rather than a value conversion.
 	template < typename S, typename T >
-	constexpr S BlindValueReInterpretation( T t_val )
+	[[nodiscard]] constexpr S BlindValueReInterpretation( T t_val )
 	{
 		if constexpr ( sizeof( S ) > sizeof( T ) )
 			return ( * reinterpret_cast< S * >( & t_val ) ) & ( ( 1ull << sizeof( T ) * 8 ) - 1 );		// cut out excessive value (i.e. clear the bits from MSB up to bit_len( T )
 		else
 			return * reinterpret_cast< S * >( & t_val );
 	}
+	// std::bit_cast will not work since it requires: sizeof(To) == sizeof(From)
+	// start_lifetime_as
+	// It means that ():
+	// "an object should be created at the given memory location without running any initialisation code"
 
 
 
-
-	auto Letter_2_Name( const Letter letter )
+	[[nodiscard]] auto Letter_2_Name( const Letter letter )
 	{
 		return Name( sizeof( Letter ), letter );
 	}
 
 
-	auto ContainsSubstrAt( const Name & n, const Name & substr )
+	[[nodiscard]] auto ContainsSubstrAt( const Name & n, const Name & substr )
 	{
 		return n.find( substr );
 	}
 
-	auto ContainsSubstrAt( const Name & n, const Letter letter )
+	[[nodiscard]] auto ContainsSubstrAt( const Name & n, const Letter letter )
 	{
 		return ContainsSubstrAt( n, Letter_2_Name( letter ) );
 	}
 
 
-	auto SplitAt( const Name & n, auto pos )
+	[[nodiscard]] auto SplitAt( const Name & n, auto pos )
 	{
 		return std::make_tuple< Name, Name >( Name( n.begin(), n.begin() + pos ), Name( n.begin() + pos, n.end() ) );
 	}
@@ -164,13 +224,129 @@ namespace BCForth
 	}
 
 
+	template < typename A, typename B >
+	constexpr bool CheckMatch( A && a, B && b )
+	{
+		if constexpr( FORTH_IS_CASE_INSENSITIVE )
+
+			return std::equal(	a.begin(), a.end(),
+										b.begin(), b.end(),
+										[] ( const auto x, const auto y ) { return std::toupper( x ) == std::toupper( y ); } );
+
+		else
+
+			return std::equal(	a.begin(), a.end(),
+										b.begin(), b.end() );
+
+	}
+
+	[[nodiscard]] constexpr auto ToUpper( Name n )
+	{
+		return n | std::ranges::views::transform( [] ( auto c ) { return std::toupper( c ); } ) | std::ranges::to< Name >();
+	}
+
 
 	// Custom error type - the message will be displayed to the user
-	struct ForthError : std::runtime_error
+	class [[nodiscard]] ForthError : public std::runtime_error
 	{
-		ForthError( const std::string & what_arg ) : runtime_error( what_arg ) {}
-		ForthError( const char * what_arg ) : runtime_error( what_arg ) {}
+		private:
+
+			bool fClearStacks { true };
+
+		public:
+
+			[[nodiscard]] bool MustClearStacks( void ) const { return fClearStacks; }
+
+		public:
+
+			ForthError( const std::string & what_arg, bool clear_stacks = true ) : runtime_error( what_arg ), fClearStacks( clear_stacks ) {}
+			ForthError( const char * what_arg, bool clear_stacks = true ) : runtime_error( what_arg ), fClearStacks( clear_stacks ) {}
 	};
+
+
+
+	// ================
+	// DEBUGGIN objects
+
+
+	#define DEBUG_ON	1
+
+
+	// When debugging, instead of passing a stream of bare strings, we need
+	// more detailed information, such as 
+	// - a token name
+	// - its position in the (text) source file
+	// - a name of that file (index, not to copy text)
+
+
+	// Strong type
+	struct  [[nodiscard]] SourceFileIndex
+	{
+		static const short kSentinelVal { -1 };
+
+		short fIndex { kSentinelVal };
+
+		static SourceFileIndex GetUniqueFileId()
+		{
+			static short id { 0 };
+			return SourceFileIndex { id ++ };
+		}
+
+		friend auto operator <=> (const SourceFileIndex &, const SourceFileIndex &) = default;
+
+	};
+
+	constexpr SourceFileIndex kSourceFileIndexSentinel { SourceFileIndex::kSentinelVal };
+
+
+#if DEBUG_ON
+
+
+
+
+	using SourceFilesMap = std::map< SourceFileIndex, std::filesystem::path >;
+
+		
+	using LnCol = std::tuple< short, short >;
+
+
+	
+	struct DebugFileInfo
+	{
+		LnCol						fSourceFile_LnCol {};
+		SourceFileIndex		fSourceFile_Index {};
+	};
+
+
+
+#else
+
+	struct DebugFileInfo
+	{
+	};
+
+
+#endif
+
+
+	// The C++20 attribute [[no_unique_address]] can help the compiler to eliminate a member if its class is empty.
+	// In such a case, the members will share the same address.
+	// This falls into the broader subject called Empty Base Class Optimization (EBO).
+	// Explanation of [[no_unique_address]] and [[msvc::no_unique_address]]
+	// https://www.cppstories.com/2021/no-unique-address/ 
+	//
+	// If the member has an empty class, the compiler can eliminate it as if it were not there at all.
+	// 
+	// https://en.cppreference.com/w/cpp/language/attributes/no_unique_address
+	// NOTE: [[no_unique_address]] is ignored by MSVC even in C++20 mode; instead, [[msvc::no_unique_address]] is provided. 
+	struct Token 
+	{
+												Name				fName {};				// token string 
+		[[no_unique_address]]	DebugFileInfo	fDebugFileInfo {};	// token position (line, col), file index
+	};
+
+	using TokenStream = std::vector< Token >;
+
 
 
 }	// The end of the BCForth namespace

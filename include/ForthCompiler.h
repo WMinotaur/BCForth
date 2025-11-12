@@ -14,7 +14,7 @@
 
 
 #include "ForthInterpreter.h"
-
+#include "FiberRoutines.h"
 
 
 
@@ -57,16 +57,17 @@ namespace BCForth
 	protected:
 
 		// The plug-in for the Forth interpreter
-		void ProcessContextSequences( Names & ns ) override
+		void ProcessContextSequences( TokenStream & ns ) override
 		{
 			const auto kNumNames { ns.size() };
 			if( kNumNames == 0 )
 				return;
 
-			const auto & leadName { ns[ 0 ] };
+			//const auto & leadName { ns[ 0 ] };
+			const auto & leadName { ns[ 0 ].fName };
 
 			// IMMEDIATE
-			if( leadName == "IMMEDIATE" )
+			if( /*leadName == "IMMEDIATE"*/ CheckMatch( leadName, kIMMEDIATE ) )
 			{
 				// Let's find the lastly entered definition and mark it immediate
 				assert( fCompiledWordName.length() > 0 );
@@ -108,20 +109,22 @@ namespace BCForth
 
 		// theWord - collects the defining words
 		// ns - a list of words that will be consumed one after one
-		void Compile_StructuralWords_Into( CompoWord< TForth > & theWord, Names & ns )
+		void Compile_StructuralWords_Into( CompoWord< TForth > & theWord, TokenStream & ns )
 		{
 
 			const auto kNumTokens { ns.size() };
 			if( kNumTokens == 0 )
 				return;
 
-			const auto & token { ns[ 0 ] };
+
+			const auto token_debug_info {  ns[ 0 ].fDebugFileInfo };
+			const auto & token_name { ns[ 0 ].fName };
 
 
 
 			// IF ... ELSE ... THEN
 			// : TEST ( n -- )   DUP 0= IF DROP ELSE PROCESS THEN ;
-			if( token == "IF" )
+			if( /*token == "IF"*/ CheckMatch( token_name, kIF ) )
 			{
 
 				Erase_n_First_Words( ns, 1 );
@@ -130,7 +133,8 @@ namespace BCForth
 
 				auto if_node { std::make_unique< IF< TForth > >( * this ) };
 				auto if_node_ptr { if_node.get() };
-				theWord.AddWord( Insert_2_NodeRepo( std::move( if_node ) ) );
+
+				theWord.AddWord( Insert_2_NodeRepo( std::move( if_node ) ), token_debug_info );
 
 				fStructuralStack.Push( & theWord );			// push the "current" node
 				fStructuralStack.Push( if_node_ptr );		// push this "IF" node
@@ -144,7 +148,7 @@ namespace BCForth
 
 
 			// IF ... ELSE ... THEN
-			if( token == "ELSE" )
+			if( /*token == "ELSE"*/ CheckMatch( token_name, kELSE ) )
 			{
 				Erase_n_First_Words( ns, 1 );
 
@@ -162,7 +166,7 @@ namespace BCForth
 
 
 			// IF ... ELSE ... THEN
-			if( token == "THEN" )
+			if( /*token == "THEN"*/ CheckMatch( token_name, kTHEN ) )
 			{
 				Erase_n_First_Words( ns, 1 );
 
@@ -198,14 +202,14 @@ namespace BCForth
 
 
 			// DO ... LOOP
-			if( token == "DO" )
+			if( CheckMatch( token_name, kDO ) )
 			{
 				Erase_n_First_Words( ns, 1 );
 
 
 				auto do_node { std::make_unique< DO_LOOP< TForth > >( * this ) };
 				auto do_node_ptr { do_node.get() };
-				theWord.AddWord( Insert_2_NodeRepo( std::move( do_node ) ) );
+				theWord.AddWord( Insert_2_NodeRepo( std::move( do_node ) ), token_debug_info );
 
 				fStructuralStack.Push( & theWord );			// push the "current" node
 				fStructuralStack.Push( do_node_ptr );		// push the "DO" node
@@ -217,14 +221,32 @@ namespace BCForth
 			}
 
 
+			// ?DO ... LOOP
+			if( CheckMatch( token_name, kQDO ) )
+			{
+				Erase_n_First_Words( ns, 1 );
+
+
+				auto do_node { std::make_unique< QDO_LOOP< TForth > >( * this ) };
+				auto do_node_ptr { do_node.get() };
+				theWord.AddWord( Insert_2_NodeRepo( std::move( do_node ) ), token_debug_info );
+
+				fStructuralStack.Push( & theWord );			// push the "current" node
+				fStructuralStack.Push( do_node_ptr );		// push the "QDO" node
+
+				// Put its body branch as the current insertion node
+				Compile_All_Into( do_node_ptr->GetBodyNodes(), ns );
+
+				return;
+			}
 
 			// DO ... LOOP
-			if( token == "LOOP" || token == "+LOOP" )
+			if( CheckMatch( token_name, kLOOP ) || CheckMatch( token_name, kPLOOP ) )
 			{
 
 				// Compile the extra "+1" literal node as the step value
-				if( token[ 0 ] != kPlus )
-					theWord.AddWord( Insert_2_NodeRepo( std::make_unique< IntValWord< TForth > >( * this, +1 ) ) );
+				if( token_name[ 0 ] != kPlus )
+					theWord.AddWord( Insert_2_NodeRepo( std::make_unique< IntValWord< TForth > >( * this, +1 ) ), token_debug_info );
 
 				Erase_n_First_Words( ns, 1 );		// get rid of the token
 
@@ -242,7 +264,7 @@ namespace BCForth
 						else
 							throw ForthError( "incorrectly interspersed structured IF - DO - LOOP" );	
 					else
-						throw ForthError( "unbalanced IF - THEN structure" );
+						throw ForthError( "unbalanced DO - LOOP structure" );
 
 				}
 				else
@@ -256,15 +278,19 @@ namespace BCForth
 
 
 			// I 
-			if( token == "I" || token == "J" )
+			if( CheckMatch( token_name, kI ) || CheckMatch( token_name, kJ ) )
 			{
-				auto skipCounter { token[ 0 ] - 'I' };		// "I" is 0, "J" is 1 (outeremost loop index)
+				auto token_letter { token_name[ 0 ] };		
+
+				if constexpr( FORTH_IS_CASE_INSENSITIVE )
+					token_letter = std::toupper( token_letter );
+
+				auto skipCounter { token_letter - 'I' };		// "I" is 0, "J" is 1 (outeremost loop index)
+				assert( skipCounter <= 2 );							// in practice this can be "I" or "J"
 				
 				Erase_n_First_Words( ns, 1 );
 
 				// Find a DO node and connect with the new I_LOOP node
-
-				auto struct_stack { fStructuralStack.data() };
 
 				for( auto i { fStructuralStack.size() }; i > 0; -- i )
 				{
@@ -274,7 +300,7 @@ namespace BCForth
 						if( skipCounter -- > 0 )
 							continue;							// go and search deeper in the stack
 
-						theWord.AddWord( Insert_2_NodeRepo( std::make_unique< I_LOOP< TForth > >( * this, * do_node ) ) );
+						theWord.AddWord( Insert_2_NodeRepo( std::make_unique< I_LOOP< TForth > >( * this, * do_node ) ), token_debug_info );
 						Compile_All_Into( theWord, ns );		// process the same compound word
 
 						return;
@@ -293,14 +319,14 @@ namespace BCForth
 			// BEGIN ... S ..v UNTIL		( iterate as long as v is FALSE )
 			// BEGIN ... SA ...v WHILE ... SB ... REPEAT ( WHILE checks v, if FALSE, then exit the loop; otherwise REPEAT jumps to BEGIN )
 			//
-			if( token == "BEGIN" )
+			if( CheckMatch( token_name, kBEGIN ) )
 			{
 				Erase_n_First_Words( ns, 1 );
 
 
 				auto do_node { std::make_unique< BEGIN_LOOP< TForth > >( * this ) };
 				auto do_node_ptr { do_node.get() };
-				theWord.AddWord( Insert_2_NodeRepo( std::move( do_node ) ) );
+				theWord.AddWord( Insert_2_NodeRepo( std::move( do_node ) ), token_debug_info );
 
 				fStructuralStack.Push( & theWord );			// push the "current" node
 				fStructuralStack.Push( do_node_ptr );		// push the "BEGIN" node
@@ -313,7 +339,7 @@ namespace BCForth
 
 
 
-			if( token == "AGAIN" )
+			if( CheckMatch( token_name, kAGAIN ) )
 			{
 				Erase_n_First_Words( ns, 1 );
 
@@ -345,7 +371,7 @@ namespace BCForth
 			}
 
 
-			if( token == "UNTIL" )
+			if( /*token == "UNTIL"*/ CheckMatch( token_name, kUNTIL ) )
 			{
 				Erase_n_First_Words( ns, 1 );
 
@@ -377,7 +403,7 @@ namespace BCForth
 			}
 
 
-			if( token == "WHILE" )
+			if( /*token == "WHILE"*/ CheckMatch( token_name, kWHILE ) )
 			{
 				Erase_n_First_Words( ns, 1 );
 
@@ -403,7 +429,7 @@ namespace BCForth
 			}
 
 
-			if( token == "REPEAT" )
+			if( /*token == "REPEAT"*/ CheckMatch( token_name, kREPEAT ) )
 			{
 				Erase_n_First_Words( ns, 1 );
 
@@ -421,7 +447,7 @@ namespace BCForth
 
 
 
-			if( token == "EXIT" )
+			if( /*token == "EXIT"*/ CheckMatch( token_name, kEXIT ) )
 			{
 				Erase_n_First_Words( ns, 1 );
 
@@ -432,7 +458,7 @@ namespace BCForth
 					if( auto * do_node = dynamic_cast< BEGIN_LOOP< TForth > * >( fStructuralStack.data()[ i - 1 ] ) )
 					{
 						// Found, ok
-						theWord.AddWord( Insert_2_NodeRepo( std::make_unique< EXIT_BEGIN_LOOP< TForth > >( * this, * do_node ) ) );
+						theWord.AddWord( Insert_2_NodeRepo( std::make_unique< EXIT_BEGIN_LOOP< TForth > >( * this, * do_node ) ), token_debug_info );
 						Compile_All_Into( theWord, ns );		// process the same compound word
 
 						return;
@@ -454,7 +480,7 @@ namespace BCForth
 			//			DUP .			\ show it before it vanishes
 			//		ENDCASE ;
 			// CASE will be transformed into the nested IF ... ELSE ... THEN
-			if( token == "CASE" )
+			if( /*token == "CASE"*/ CheckMatch( token_name, kCASE ) )
 			{
 				// Actually do nothing - the real actions take place after encountering OF
 				Erase_n_First_Words( ns, 1 );
@@ -464,7 +490,7 @@ namespace BCForth
 
 				auto case_node { std::make_unique< CASE< TForth > >( * this ) };
 				auto case_node_ptr { case_node.get() };
-				theWord.AddWord( Insert_2_NodeRepo( std::move( case_node ) ) );
+				theWord.AddWord( Insert_2_NodeRepo( std::move( case_node ) ), token_debug_info );
 
 				fStructuralStack.Push( case_node_ptr );		// push this "CASE" node
 
@@ -473,30 +499,30 @@ namespace BCForth
 				return;
 			}
 
-			if( token == "OF" )
+			if( /*token == "OF"*/ CheckMatch( token_name, kOF ) )
 			{
 				Erase_n_First_Words( ns, 1 );
 
 				// Before the IF node insert OVER =
 				// CHANGE - these words should be already in the dictionary, so find them and isert calls to them 
 				assert( GetWordEntry( "OVER" ) );
-				theWord.AddWord( ( * GetWordEntry( "OVER" ) )->fWordUP.get() );
+				theWord.AddWord( ( * GetWordEntry( "OVER" ) )->fWordUP.get(), token_debug_info );
 
 				assert( GetWordEntry( "=" ) );
-				theWord.AddWord( ( * GetWordEntry( "=" ) )->fWordUP.get() );
+				theWord.AddWord( ( * GetWordEntry( "=" ) )->fWordUP.get(), token_debug_info );
 
 
 
 				// Create the IF node and insert to the current definition
 				auto if_node { std::make_unique< IF< TForth > >( * this ) };
 				auto if_node_ptr { if_node.get() };
-				theWord.AddWord( Insert_2_NodeRepo( std::move( if_node ) ) );
+				theWord.AddWord( Insert_2_NodeRepo( std::move( if_node ) ), token_debug_info );
 
 				fStructuralStack.Push( if_node_ptr );		// push this "IF" node
 
 
 				assert( GetWordEntry( "DROP" ) );
-				if_node_ptr->GetTrueNode().AddWord( ( * GetWordEntry( "DROP" ) )->fWordUP.get() );
+				if_node_ptr->GetTrueNode().AddWord( ( * GetWordEntry( "DROP" ) )->fWordUP.get(), token_debug_info );
 
 				// Put its "TRUE" branch as the current insertion node
 				Compile_All_Into( if_node_ptr->GetTrueNode(), ns );
@@ -507,7 +533,7 @@ namespace BCForth
 
 
 			// Acts as ELSE
-			if( token == "ENDOF" )
+			if( /*token == "ENDOF"*/ CheckMatch( token_name, kENDOF ) )
 			{
 				Erase_n_First_Words( ns, 1 );
 
@@ -527,7 +553,7 @@ namespace BCForth
 
 
 			// ENDCASE needs to un-wind the fStructuralStack up to the nearest CASE node
-			if( token == "ENDCASE" )
+			if( /*token == "ENDCASE"*/ CheckMatch( token_name, kENDCASE ) )
 			{
 				Erase_n_First_Words( ns, 1 );
 
@@ -572,26 +598,27 @@ namespace BCForth
 
 
 
-			// Compile-in word's execution token (i.e. the address of the Word object to execute its operato())
-			if( token == "[']" )
+			// Compile-in word's execution token (i.e. the address of the Word object to execute its operator())
+			// [']
+			if( /*token == "[']"*/ CheckMatch( token_name, kB_TICK_B ) )
 			{
 				// The same action as for the LITERAL but with the word's pointer 
-				if( const auto word_entry_ptr = GetWordEntry( ns[ 1 ] ) )
-					theWord.AddWord( Insert_2_NodeRepo( std::make_unique< CellValWord< TForth > >( * this, reinterpret_cast< CellType >( ( * word_entry_ptr )->fWordUP.get() ) ) ) );
+				if( const auto word_entry_ptr = GetWordEntry( ns[ 1 ].fName ) )
+					theWord.AddWord( Insert_2_NodeRepo( std::make_unique< CellValWord< TForth > >( * this, reinterpret_cast< CellType >( ( * word_entry_ptr )->fWordUP.get() ) ) ), token_debug_info );
 				else
-					throw ForthError( " unknown word " + ns[ 1 ] + " following [']" );
+					throw ForthError( " unknown word " + ns[ 1 ].fName + " following [']" );
 
 				Erase_n_First_Words( ns, 2 );		// get rid of the two tokenn
+				Compile_All_Into( theWord, ns );	// return to the compile mode	- added by BC on March 24th '24
 				return;
 			}
-
 
 
 
 			// ==========================================
 
 			// Process immediate words
-			if( token == "[" )
+			if( /*token == "["*/ CheckMatch( token_name, kLB ) )
 			{
 				fAllImmediate = true;
 				Erase_n_First_Words( ns, 1 );		// get rid of the token
@@ -599,7 +626,7 @@ namespace BCForth
 			}
 
 
-			if( token == "]" )
+			if( /*token == "]"*/ CheckMatch( token_name, kRB ) )
 			{
 				fAllImmediate = false;
 				Erase_n_First_Words( ns, 1 );		// get rid of the token
@@ -608,16 +635,16 @@ namespace BCForth
 			}
 
 
-			if( token == "POSTPONE" )
+			if(/* token == "POSTPONE"*/ CheckMatch( token_name, kPOSTPONE ) )
 			{
 				if( ns.size() <= 1 )
-					throw ForthError( "Syntax  POSTPONE should be followed by a word" );
+					throw ForthError( "Syntax error: POSTPONE should be followed by a word" );
 
 
-				if( const auto word_entry_ptr = GetWordEntry( ns[ 1 ] ) )
-					theWord.AddWord( Insert_2_NodeRepo( std::make_unique< Postpone< TForth > >( * this, ( * word_entry_ptr )->fWordUP.get() ) ) );
+				if( const auto word_entry_ptr = GetWordEntry( ns[ 1 ].fName ) )
+					theWord.AddWord( Insert_2_NodeRepo( std::make_unique< Postpone< TForth > >( * this, ( * word_entry_ptr )->fWordUP.get() ) ), token_debug_info );
 				else
-					throw ForthError( " unknown word " + ns[ 1 ] + " following POSTPONE" );
+					throw ForthError( " unknown word " + ns[ 1 ].fName + " following POSTPONE" );
 
 
 				Erase_n_First_Words( ns, 2 );		// get rid of the token
@@ -627,10 +654,10 @@ namespace BCForth
 
 
 
-			if( token == "LITERAL" )
+			if( /*token == "LITERAL"*/ CheckMatch( token_name, kLITERAL ) )
 			{
 				if( typename DataStack::value_type t {}; GetDataStack().Pop( t ) )
-					theWord.AddWord( Insert_2_NodeRepo( std::make_unique< CellValWord< TForth > >( * this, t ) ) );
+					theWord.AddWord( Insert_2_NodeRepo( std::make_unique< CellValWord< TForth > >( * this, t ) ), token_debug_info );
 				else
 					throw ForthError( "unexpectedly empty stack" );
 
@@ -639,7 +666,8 @@ namespace BCForth
 			}
 
 
-			if( token == "DOES>" )
+			// DOES>
+			if( /*token == "DOES>"*/ CheckMatch( token_name, kDOES_G ) )
 			{
 
 				// When DOES> is encountered then the following needs to be done:
@@ -663,7 +691,7 @@ namespace BCForth
 
 				does_node_ptr->GetCreationNode().GetWordsVec() = theWord.GetWordsVec();		// copy whatever has been already collected in theWord
 				theWord.GetWordsVec().clear();
-				theWord.AddWord( Insert_2_NodeRepo( std::move( does_node ) ) );				// from now on, execution of theWord will launch exclusively action of the DOES node
+				theWord.AddWord( Insert_2_NodeRepo( std::move( does_node ) ), token_debug_info );				// from now on, execution of theWord will launch exclusively action of the DOES node
 
 				// Switch off the current context to the behavioral branch of the DOES node
 				Compile_All_Into( does_node_ptr->GetBehaviorNode(), ns );					// return to the compile mode
@@ -673,12 +701,12 @@ namespace BCForth
 
 
 			// (bracket-care) take the following word/char and compile its ASCII value
-			if( token == "[CHAR]" )
+			if( /*token == "[CHAR]"*/ CheckMatch( token_name, kB_CHAR_B ) )
 			{
 				if( ns.size() <= 1 )
 					throw ForthError( "Syntax  [CHAR] should be followed by a text" );
 
-				theWord.AddWord( Insert_2_NodeRepo( std::make_unique< CharValWord< TForth > >( * this, BlindValueReInterpretation< Char >( ns[ 1 ][ 0 ] ) ) ) );
+				theWord.AddWord( Insert_2_NodeRepo( std::make_unique< CharValWord< TForth > >( * this, BlindValueReInterpretation< Char >( ns[ 1 ].fName[ 0 ] ) ) ), token_debug_info );
 
 				Erase_n_First_Words( ns, 2 );		// get rid of the tokens
 				Compile_All_Into( theWord, ns );	// return to the compile mode
@@ -690,7 +718,7 @@ namespace BCForth
 
 		// theWord - collects the defining words
 		// ns - a list of words that will be consumed one after one
-		void Compile_All_Into( CompoWord< TForth > & theWord, Names & ns )
+		void Compile_All_Into( CompoWord< TForth > & theWord, TokenStream & ns )
 		{
 
 			Compile_StructuralWords_Into( theWord, ns );
@@ -701,15 +729,17 @@ namespace BCForth
 				return;
 
 
-			const auto & token { ns[ 0 ] };
+			const auto & token_name { ns[ 0 ].fName };
+
+			const auto token_debug_info { ns[ 0 ].fDebugFileInfo };
 
 
-			if( IsInteger( token, ReadTheBase() ) )
+			if( IsInteger( token_name, ReadTheBase() ) )
 			{
 				if( fAllImmediate )
-					GetDataStack().Push( BlindValueReInterpretation< CellType >( Word_2_Integer( token ) ) );
+					GetDataStack().Push( BlindValueReInterpretation< CellType >( Word_2_Integer( token_name ) ) );
 				else
-					theWord.AddWord( Insert_2_NodeRepo( std::make_unique< IntValWord< TForth > >( * this, Word_2_Integer( token ) ) ) );
+					theWord.AddWord( Insert_2_NodeRepo( std::make_unique< IntValWord< TForth > >( * this, Word_2_Integer( token_name ) ) ), token_debug_info );
 
 				Erase_n_First_Words( ns, 1 );
 				Compile_All_Into( theWord, ns );
@@ -717,13 +747,13 @@ namespace BCForth
 			}
 
 
-			if( IsFloatingPt( token ) )
+			if( IsFloatingPt( token_name ) )
 			{	
 				if( fAllImmediate )
-					GetDataStack().Push( BlindValueReInterpretation< CellType >( stod( token ) ) );
+					GetDataStack().Push( BlindValueReInterpretation< CellType >( stod( token_name ) ) );
 				else
 					// Const from the words' definitions are compiled into the dictionary as well 
-					theWord.AddWord( Insert_2_NodeRepo( std::make_unique< DblValWord< TForth > >( * this, stod( token) ) ) );
+					theWord.AddWord( Insert_2_NodeRepo( std::make_unique< DblValWord< TForth > >( * this, stod( token_name) ) ), token_debug_info );
 
 				Erase_n_First_Words( ns, 1 );
 				Compile_All_Into( theWord, ns );
@@ -731,33 +761,36 @@ namespace BCForth
 			}
 
 
-			if( token == kDotQuote || token == kCQuote || token == kSQuote )
+			//if( token == kDotQuote || token == kCQuote || token == kSQuote )
+			if( CheckMatch( token_name, kDotQuote ) || CheckMatch( token_name, kCQuote ) || CheckMatch( token_name, kSQuote ) )
 			{
 				// Just entered the number of tokens up to the closing "
-				const auto loc_token { token };		// make a local copy before it is erased
+				const auto loc_token { token_name };		// make a local copy before it is erased
 				Erase_n_First_Words( ns, 1 );
 
 				if( auto [ flag, str ] = CollectTextUpToTokenContaining( ns, Letter(), kQuote ); flag )
 				{
 					// First, a small factory
 					WordPtr		wp {};
+
+
 					if( loc_token == kDotQuote )
 						wp = Insert_2_NodeRepo( std::make_unique< QuoteSuite< TForth > >( * this, std::move( str ), 
 																							[ this ] ( const auto & s, auto & ) { fOutStream << s; return true; } ) );
 					else
 						if( loc_token == kSQuote )		// ( -- addr u )
 							wp = Insert_2_NodeRepo( std::make_unique< QuoteSuite< TForth > >( * this, std::move( str ), 
-																							[ this ] ( const auto & s, auto & ds ) { ds.Push( reinterpret_cast< CellType >( s.data() ) ); ds.Push( static_cast< CellType >( s.length() ) ); return true; } ) );
+																							[] ( const auto & s, auto & ds ) { ds.Push( reinterpret_cast< CellType >( s.data() ) ); ds.Push( static_cast< CellType >( s.length() ) ); return true; } ) );
 						else							// ( -- addr )
 							wp = Insert_2_NodeRepo( std::make_unique< QuoteSuite< TForth > >( * this, std::move( str ), 
-																							[ this ] ( const auto & s, auto & ds ) { ds.Push( reinterpret_cast< CellType >( s.data() ) ); return true; } ) );
+																							[] ( const auto & s, auto & ds ) { ds.Push( reinterpret_cast< CellType >( s.data() ) ); return true; } ) );
 
 
 					// Then, either execute if in the immediate mode or add to the current definition
 					if( fAllImmediate )
 						( * wp )();
 					else
-						theWord.AddWord( wp );
+						theWord.AddWord( wp, token_debug_info );
 
 				}
 				else
@@ -771,7 +804,7 @@ namespace BCForth
 
 
 
-			if( token == kAbortQuote )
+			if( /*token == kAbortQuote*/ CheckMatch( token_name, kAbortQuote ) )
 			{
 				// Just entered the number of tokens up to the closing "
 
@@ -781,7 +814,7 @@ namespace BCForth
 					if( fAllImmediate )
 						throw str;		// what to do with the immediate ABORT" ?
 					else
-						theWord.AddWord( Insert_2_NodeRepo( std::make_unique< AbortQuote< TForth > >( * this, std::move( str ) ) ) );
+						theWord.AddWord( Insert_2_NodeRepo( std::make_unique< AbortQuote< TForth > >( * this, std::move( str ) ) ), token_debug_info );
 				else
 					throw ForthError( "no closing \" found for the opening ABORT\"" );
 
@@ -791,7 +824,7 @@ namespace BCForth
 
 
 			// Extract word's comment
-			if( token == Name( 1, kLeftParen ) )
+			if( /*token == Name( 1, kLeftParen )*/ CheckMatch( token_name, Name( 1, kLeftParen ) ) )
 			{
 				// Just entered the number of tokens up to the closing "
 
@@ -807,9 +840,62 @@ namespace BCForth
 			}
 
 
+			// ==========================================
+			// CoRoutine words
+
+			// CO_RANGE
+			if( /*token == "CO_RANGE"*/ CheckMatch( token_name, kCO_RANGE ) )
+			{
+				Erase_n_First_Words( ns, 1 );
+
+				auto wp = Insert_2_NodeRepo( std::make_unique< CoRange< TForth > >( * this ) );
+				( * wp )();		// call the co-word to initialize - it can throw e.g. if there are not three init values on the data stack	
+				theWord.AddWord( wp, token_debug_info );
+
+				Compile_All_Into( theWord, ns );
+				return;
+			}
+
+
+
+			// kCO_FIBER
+			if( CheckMatch( token_name, kCO_FIBER ) )
+			{
+				Erase_n_First_Words( ns, 1 );
+
+				//auto wp = Insert_2_NodeRepo( std::make_unique< CoRoFiber< TForth > >( * this, & theWord ) );
+				//( * wp )();		// call the co-word to initialize - it can throw e.g. if there are not three init values on the data stack	
+				//theWord.AddWord( wp, token_debug_info );
+
+				// TODO: just for now - a special coro word
+				// we can substitute the name in the dictionary
+				//auto wp = InsertWord_2_Dict( "MyFib1_CORO", std::make_unique< CoRoFiber< TForth > >( * this, & theWord ) );
+				//( * wp )();		// call the co-word to initialize - it can throw e.g. if there are not three init values on the data stack
+
+
+
+				if( ns.size() != 0 )
+					throw ForthError( "syntax error - CO_FIBER should be the last word in a definition" );
+
+				//CompoWord< TForth > a( * this );
+				//CompoWord< TForth > b( std::move( a ) );
+				auto coro_fiber_up = std::make_unique< CoRoFiber< TForth > >( * this, /*& theWord*/std::move( theWord ) );
+				( * coro_fiber_up )();	// call the co-word to initialize - it can throw e.g. if there are not three init values on the data stack
+
+				// Exchange the current word "theWord" with "coro_fiber_up" (hook-up)
+				auto hook_word = CompoWord< TForth >( * this );
+				hook_word.AddWord( coro_fiber_up.release() );
+				theWord = std::move( hook_word );
+
+				Compile_All_Into( theWord, ns );
+				return;
+			}
+
+
+			// ==========================================
 
 			// Look for the words in the dictionary
-			if( const auto word_entry_ptr = GetWordEntry( token ); word_entry_ptr && ( * word_entry_ptr )->fWordIsCompiled == false )
+			if( const auto word_entry_ptr = GetWordEntry( token_name ); word_entry_ptr && ( * word_entry_ptr )->fWordIsCompiled == false )
 			{
 				// If IMMEDIATE, or in the [ ... ] context, then execute righ now
 				if( ( * word_entry_ptr )->fWordIsImmediate || fAllImmediate )
@@ -820,9 +906,8 @@ namespace BCForth
 				}
 				else
 				{
-					theWord.AddWord( ( * word_entry_ptr )->fWordUP.get() );
+					theWord.AddWord( ( * word_entry_ptr )->fWordUP.get(), token_debug_info );
 				}
-
 
 				Erase_n_First_Words( ns, 1 );
 				Compile_All_Into( theWord, ns );		
@@ -830,7 +915,7 @@ namespace BCForth
 			}
 			else
 			{
-				throw ForthError( "Unknown word " + token + " used in definition" );
+				throw ForthError( "Unknown word " + token_name + " used in definition" );
 			}
 
 
@@ -838,24 +923,33 @@ namespace BCForth
 
 
 
-		virtual bool EnterWordDefinition( Names && ns )
+		virtual bool EnterWordDefinition( TokenStream && ns )
 		{
 			const auto kTokens { ns.size() };
 			assert( kTokens > 2 );				// at least : [name] ;
 
-			assert( ns[ 0 ][ 0 ] == kColon );
-			assert( ns[ kTokens - 1 ][ 0 ] == kSemColon );
+			assert( ns[ 0 ].fName[ 0 ] == kColon );
+			assert( ns[ kTokens - 1 ].fName[ 0 ] == kSemColon );
 
 			// Check if the word with that name is already registered in the dictionary (ok to overwrite?)
-			const auto & word_name { ns[ 1 ] };
+			Name word_name;		
+			if constexpr( FORTH_IS_CASE_INSENSITIVE )
+				word_name = ToUpper( ns[ 1 ].fName );
+			else
+				word_name = ns[ 1 ].fName;
+
+
+
 			if( GetWordEntry( word_name ) )
 				if( DecisionOnWordAlreadyExists( word_name ) == false )
 					return false;	// don't overwrite
 
+			auto token_debug_info { ns[ 1 ].fDebugFileInfo };		// make a copy, since this will be obliterated on the way
+
 
 			fCompiledWordName = word_name;			// store it in the case this word will be later marked as IMMEDIATE
 
-			fProcessingDefiningWord = false;		// we don't know yet
+			fProcessingDefiningWord = false;			// we don't know yet
 
 			// At firt create an entry for the (possibly) new word,
 			// or replace the previous one
@@ -865,11 +959,11 @@ namespace BCForth
 
 
 			//                                                    is being compiled
-			WordEntry new_word_entry( std::move( new_word_node ), true, false, false, "" );
+			WordEntry new_word_entry { std::move( new_word_node ), true, false, false, "", token_debug_info  };
 
 
-			ns.erase( ns.begin() );						// remove :
-			ns.erase( ns.begin() );						// remove the word name
+			ns.erase( ns.begin() );								// remove :
+			ns.erase( ns.begin() );								// remove the word name
 			ns.erase( ns.begin() + ns.size() - 1 );		// remove ;
 
 
@@ -881,7 +975,7 @@ namespace BCForth
 
 
 			new_word_entry.fWordComment = fWordCommentStr;			// copy the collected comment
-			fWordCommentStr = "";									// reset the comment string
+			fWordCommentStr = "";											// reset the comment string
 
 			new_word_entry.fWordIsCompiled = false;					// indicate the end of compilation
 			new_word_entry.fWordIsDefining = fProcessingDefiningWord;
@@ -920,7 +1014,7 @@ namespace BCForth
 
 
 		// Parse & execute a stream of tokens
-		void operator() ( Names && ns ) override
+		void operator() ( TokenStream && ns ) override
 		{
 			// Passing ns as && means "it is ok to dispose ns" and indeed we consume it
 
@@ -932,16 +1026,15 @@ namespace BCForth
 
 			// Can be a call or a word definition
 			const auto kMinTokens4Def { 3 };
-			if( ns_size >= kMinTokens4Def && ns[ 0 ][ 0 ] == kColon && ns[ ns_size - 1 ][ 0 ] == kSemColon )
+			if( ns_size >= kMinTokens4Def && ns[ 0 ].fName[ 0 ] == kColon && ns[ ns_size - 1 ].fName[ 0 ] == kSemColon )
 			{
 				// A word definition
 				EnterWordDefinition( std::move( ns ) );		// we have to use std::move since a named rvalue (ns in our case) is an lvalue!
-			}												// since all named values are lvalues - the rule, "If it has a name, then it's an lvalue."
+			}																// since all named values are lvalues - the rule, "If it has a name, then it's an lvalue."
 			else
 			{
-				Base::operator()( std::move( ns ) );		// call the base to execute the words (again, ns is an lvalue since it is named, so we need to call std::move)
+				Base::operator()( std::move( ns ) );			// call the base to execute the words (again, ns is an lvalue since it is named, so we need to call std::move)
 			}
-
 
 		}
 
@@ -965,10 +1058,10 @@ namespace BCForth
 	public:
 
 		// It clears the data and return stacks - should be called in the catch 
-		void CleanUpAfterRunTimeError( void ) override
+		void CleanUpAfterRunTimeError( bool must_clear_stacks ) override
 		{
-			Base::CleanUpAfterRunTimeError();					// the base will clear data and return stacks
-			fStructuralStack.clear();							// clear the structural stack
+			Base::CleanUpAfterRunTimeError( must_clear_stacks );	// the base will clear data and return stacks
+			fStructuralStack.clear();								// clear the structural stack
 		}
 
 

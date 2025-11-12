@@ -1,0 +1,30 @@
+\ IF - ELSE -THEN test
+\ ../examples/if_else_test.txt
+
+
+variable direction
+
+
+: left  -1  0 ;
+: right  1  0 ;
+: down   0  1 ;
+: up     0 -1 ;
+
+
+
+: key? 1 ;
+
+
+: gameloop ( time -- )
+begin dup 
+key? if key
+   dup 97 = if ['] left ELSE
+   dup 119 = if ['] up ELSE
+   dup 100 = if ['] right ELSE
+   dup 115 = if ['] down ELSE direction @
+   then then then then
+  direction ! drop then
+direction 
+until drop ." *** GAME OVER ***" ;
+
+

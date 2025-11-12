@@ -61,7 +61,7 @@ namespace BCForth
 
 		void AddWord( Name n ) { fWords.emplace_back( n ); }
 
-		auto & GetWords( void ) { return fWords; }
+		[[nodiscard]] auto & GetWords( void ) { return fWords; }
 
 	public:
 
@@ -71,7 +71,12 @@ namespace BCForth
 			for( const auto & word : fWords )
 			{ 
 				std::istringstream ss( word );
+				
+#if DEBUG_ON
+				forth_comp( TForthReader_4_Debugging()( ss ) );	
+#else
 				forth_comp( TForthReader()( ss ) );	
+#endif
 			}
 		}
 
@@ -128,8 +133,13 @@ namespace BCForth
 		void operator () ( TForthCompiler & forth_comp ) override
 		{
 			if( std::ifstream fs( fFModulePath ); fs )
+#if DEBUG_ON
+				for( TForthReader_4_Debugging fileReader; fs; forth_comp( fileReader( fs ) ) ) 
+					;	
+#else
 				for( TForthReader fileReader; fs; forth_comp( fileReader( fs ) ) ) 
 					;	
+#endif
 		}
 
 	};
@@ -200,6 +210,11 @@ namespace BCForth
 			forth_comp.InsertWord_2_Dict( "SCLEAR",	std::make_unique< ExGenericStackOp< TForth, 
 																						[] ( auto & ds )	{	ds.clear(); return true; } 
 																	> >( forth_comp ), " a ... z --  " );
+
+			// Push stack depth onto the stack (consider depth value as well, so if there were 10 20 30, the depth will be 3)
+			forth_comp.InsertWord_2_Dict( "SDEPTH",	std::make_unique< ExGenericStackOp< TForth, 
+																						[] ( auto & ds )	{	return ds.Push( ds.size() /*+ 1*/ ); } 
+																	> >( forth_comp ), " --  " );
 
 
 			// Ret stack operations

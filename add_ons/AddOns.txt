@@ -4,10 +4,24 @@
 
 
 \ Some helpers
-\: 3DUP 	( a b c -- a b c a b c ) DUP 2OVER ROT		;	\ a b c a b c 
-\: 3DROP ( a b c -- ) 2DROP DROP ;
+\ Display depth of the data stack
+: .SDEPTH	( -- sd ) SDEPTH . ;
+: SDEEP		( -- sd ) SDEPTH ;
+: .SDEEP	( -- sd ) .SDEPTH ;
 
 
+: ACCU		( x0 x1 ... xn -- x0+x1...+xn ) SDEPTH 1- 0 DO + LOOP ;
+: ACCU. 	( x0 x1 ... xn -- x0+x1...+xn ) ACCU DUP . ;
+
+: FACCU 	( f0 f1 ... fn -- f0+f1...+fn ) SDEPTH 1- 0 DO F+ LOOP ;
+: FACCU. 	( f0 f1 ... fn -- f0+f1...+fn ) FACCU DUP .F ;
+
+
+: MULT 		( x0 x1 ... xn -- x0*x1...*xn ) SDEPTH 1- 0 DO * LOOP ;
+: MULT. 	( x0 x1 ... xn -- x0*x1...*xn ) MULT DUP . ;
+
+: FMULT 	( f0 f1 ... fn -- f0*f1...*fn ) SDEPTH 1- 0 DO F* LOOP ;
+: FMULT. 	( f0 f1 ... fn -- f0*f1...*fn ) FMULT DUP .F ;
 
 
 \ A helper
@@ -73,11 +87,15 @@ VARIABLE 	WORD_2_MEASURE
 \ ===================================================
 
 \ Usuful in my daily computations
-: F+.	F+ .F ;
-: F-.	F- .F ;
-: F*.	F* .F ;
-: F/.	F/ .F ;
+: F.	( fx -- )	.F ;
+: F+.	( fx fy -- fx+fy )	F+	DUP	.F ;
+: F-.	( fx fy -- fx-fy )	F-	DUP	.F ;
+: F*.	( fx fy -- fx*fy )	F*	DUP	.F ;
+: F/.	( fx fy -- fx/fy )	F/	DUP	.F ;
 
+
+\ Redefine if you wish a different debugging file
+: DebugFileName S" C:/Research/Projects/Other/BCForth_RunTime_Version/BCForthDebugInfoFile.txt" ;
 
 
 

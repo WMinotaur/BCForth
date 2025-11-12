@@ -1,0 +1,21 @@
+\ Various tests
+\ ../examples/variable.txt
+
+
+VARIABLE abc
+
+13 abc !
+
+abc
+@
+.
+
+
+
+
+
+
+
+
+
+

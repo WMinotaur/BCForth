@@ -31,11 +31,16 @@ namespace BCForth
 
 
 // The IO reader
-template < bool CaseInsensitive = FORTH_IS_CASE_INSENSITIVE >
+//template < bool CaseInsensitive = FORTH_IS_CASE_INSENSITIVE >
 class TForthReader
 {
 
 	// Some grep definitions
+
+
+public:
+
+	virtual ~TForthReader() = default;			// we'll derive from it
 
 protected:
 
@@ -53,13 +58,13 @@ public:
 
 
 	// Read a line or lines and return the names
-	virtual Names operator() ( std::istream & i )
+	virtual TokenStream operator() ( std::istream & i )
 	{
 
 		Name lines;
 
 		// This is a simple state machine:
-		//		Take the first line and check if it beginns with the colon (i.e. it is a word definition);
+		//		Take the first line and check if it begins with the colon (i.e. it is a word definition);
 		//			If so, then read all lines up and including the one that contains a semicolon (i.e. a word end).
 		//		If no colon, then it is a word call
 
@@ -70,59 +75,27 @@ public:
 
 			if( auto pos = ln.find_first_not_of( kBlanks ); pos != Name::npos && ln[ pos ] == kColon )
 				while( ln.find( kSemColon, pos ) == Name::npos && std::getline( i, ln )  )		// read new lines until a one with ; is found
-					lines += kCR + StripEndingComment( ln );		// add CR since getline swallows it
-
-		}
-
-		// Split all these into the nonempty tokens
-		Names outNames;
-		std::copy_if(	std::sregex_token_iterator( lines.cbegin(), lines.cend(), kBlanksRe, -1 ), std::sregex_token_iterator(), 
-						std::back_inserter( outNames ), [] ( const auto & s ) { return s.length() > 0; } );
-
-
-
-		if constexpr( CaseInsensitive )
-		{
-
-			// Toggle cur_skip_flag on discovering inStr in n or outStr in n
-			// cur_skip_flag == true means we are in the special "don't case change" mode
-			// returned true means we enter the "special' mode
-			auto assessSkipFlag = [] ( bool cur_skip_flag, const Name & n, const Name & inStr, const Name & outStr ) {
-
-				if( cur_skip_flag == false && n == inStr )		// Toggle flag - to prevent entering for the second inStr
-					return true;
-				else
-					if( cur_skip_flag == true && ContainsSubstrAt( n, outStr ) != Name::npos )
-						return false;
-
-				return cur_skip_flag;
-			};
-
-
-
-			// Here we convert each token to the UPPERCASE, however there are exceptions (e.g. the user entered text)
-			for( bool skip_flags [] = { false, false }; auto & n : outNames )		// convert all to uppercase
-			{
-
-				if( skip_flags[ 0 ] == false && skip_flags[ 1 ] == false )
-					std::transform( n.begin(), n.end(), n.begin(), [] ( const auto c ) { return static_cast< Char >( std::toupper( c ) ); } );
-
-				if( skip_flags[ 1 ] == false )															// Find first such that
-					for( auto prev_skip_flag_0 { skip_flags[ 0 ] }; const auto & specModeEnterToken : { kDotQuote, kCommaQuote, kAbortQuote, kCQuote, kSQuote } )
-						if( prev_skip_flag_0 ^ ( skip_flags[ 0 ] = assessSkipFlag( skip_flags[ 0 ], n, specModeEnterToken, Name( 1, kQuote ) ) ) )
-							break;	// if there was a toggle from the "spec mode" to the "normal one", or vice versa, then do NOT check anything more (to prevent checking the "trigerring" token twice, such as ,")
-
-
-				if( skip_flags[ 0 ] == false )
-					skip_flags[ 1 ] = assessSkipFlag( skip_flags[ 1 ], n, Name( 1, kLeftParen ), Name( 1, kRightParen ) );
-
-			}
+					lines += Name( kCR ) + StripEndingComment( ln );		// add CR since getline swallows it
 
 		}
 
 
 
-		return outNames;
+		// We need to do the following steps:
+		// (1)	Iterate through all strings (i.e. token names) provided by the std::sregex_token_iterator
+		// (2)	Pass only those that are not empty strings
+		// (3)	Transform each string to a Token object
+		// (4)	Create and return a vector of such Tokens
+
+		assert( sizeof( Token ) == sizeof( Token::fName ) );			// This is to tell that in the non-debug mode each token is just a string, nothing more
+
+		// Create a range from a pair of iterators (actually - a subrange)
+		// "-1" represents the parts that are not matched (e.g, the stuff between matches)
+		auto tok_names = std::ranges::subrange( std::sregex_token_iterator( lines.cbegin(), lines.cend(), kBlanksRe, -1 ), std::sregex_token_iterator() );
+
+		return	tok_names	| std::ranges::views::filter( [] ( const auto & s ) { return s.length() > 0; } )		// std::ranges::views == std::views
+									| std::ranges::views::transform( [] ( const auto & a ) { return Token { a }; } )
+									| std::ranges::to< TokenStream >();
 
 	}
 
@@ -130,6 +103,172 @@ public:
 
 
 };
+
+
+
+
+
+
+#if DEBUG_ON
+
+
+class TForthReader_4_Debugging
+{
+
+	// Debug data
+	SourceFileIndex	fSourceFileIndex { SourceFileIndex::kSentinelVal };
+
+
+	int fTotalCharCounter { 0 };		// counts all chars from the moment the file was opened
+
+
+public:
+
+	TForthReader_4_Debugging( SourceFileIndex fIndx = kSourceFileIndexSentinel ) : fSourceFileIndex( fIndx ) 
+	{
+	}
+
+protected:
+
+
+	// Returns true if 1-to-the-left and 1-to-the-right is space or backspace
+	bool IsSeparateSymbol( const Name & str, int p )
+	{
+		assert( p >= 0 );
+		assert( p < std::ssize( str ) );
+		Letter left { p > 0 ? str[ p-1 ] : kSpace };
+		Letter right { p < std::ssize( str )-1 ? str[ p+1 ] : kSpace }; 
+		return ( left == kSpace || left == kTab ) && ( right == kSpace || right == kTab );
+	}
+
+public:
+
+
+	// Read a line or lines and return the names
+	// However, in the DEBUG mode the thing is we need to store the line numbers alongside with the tokens
+	virtual TokenStream operator() ( std::istream & i )	
+	{
+		assert( sizeof( Token ) > sizeof( Token::fName ) );
+
+		TokenStream		outTokenStream;
+
+		Name ln;
+
+		// Read:
+		// - read one line 
+		// - check if there is a defining colon :
+		// - if there is :, then read all consecutive lines up to and including the ending semicolon ;
+		bool enterDefinition { false };
+
+
+		for( int lineCnt{ 0 };	( enterDefinition == false && lineCnt == 0	&& std::getline( i, ln ) )
+											||
+										( enterDefinition == true							&& std::getline( i, ln ) )
+			
+				; ++ lineCnt )
+		{
+			Name tokName;		// a current token
+
+
+
+			bool skipCommentLine { false };
+			for( int colCnt{ 0 }; colCnt < ln.size() && skipCommentLine == false; ++ colCnt, ++ fTotalCharCounter )
+			{
+
+
+				// Filter out all blanks but keep line and column count
+				switch( auto c = ln[ colCnt ]; c )
+				{
+					[[likely]] default:
+						tokName += c;
+
+						if( colCnt == ln.size() - 1 )
+						{
+							// If the last valid char is just at newline
+							int tokSize = static_cast< int >( tokName.size() );		
+							assert( tokSize > 0 );			// for sure it is > 0
+							outTokenStream.emplace_back( Token { std::move( tokName ), { { fTotalCharCounter + 1 - tokSize, tokSize }, fSourceFileIndex } } );
+						}
+
+						break;
+
+
+					case kSpace:
+					case kTab:
+
+						if( int tokSize = static_cast< int >( tokName.size() ); tokSize > 0 )
+						{
+							assert( fTotalCharCounter >= tokSize );
+							outTokenStream.emplace_back( Token { std::move( tokName ), { { fTotalCharCounter - tokSize, tokSize }, fSourceFileIndex } } );	// assuming no SSO in tokName
+							tokName.clear();
+						}
+
+						break;		// a token is complete, jump out
+
+					case kBackSlash:
+
+						assert( ln.size() >= colCnt + 1 );
+						fTotalCharCounter += static_cast< int >( ln.size() ) - colCnt - 1;		// actuall "-1" because the backslash is aready accounted for
+						skipCommentLine = true;
+						assert( tokName.size() == 0 );
+						break;
+
+
+					[[unlikely]] case kColon:
+
+						// we allows words such as "BUFFER:"
+						if( IsSeparateSymbol( ln, colCnt ) )
+						{
+							outTokenStream.emplace_back( Token { Letter_2_Name( kColon ), { { fTotalCharCounter, 1 }, fSourceFileIndex } } );
+							enterDefinition = true;
+						}
+						else
+						{
+							tokName += c;
+						}
+
+						break;
+
+					[[unlikely]] case kSemColon:
+
+						if( IsSeparateSymbol( ln, colCnt ) )
+						{
+							assert( fTotalCharCounter > 0 );
+							outTokenStream.emplace_back( Token { Letter_2_Name( kSemColon ), { { fTotalCharCounter, 1 }, fSourceFileIndex } } );
+							enterDefinition = false;
+						}
+						else
+						{
+							tokName += c;						
+						}
+
+						break;
+
+				}
+
+
+			}
+
+			fTotalCharCounter += 2;		// count a hidden new line
+
+		}
+
+
+		return outTokenStream; 
+
+	}
+
+
+
+
+
+
+};
+
+#endif
+
+
+
 
 
 

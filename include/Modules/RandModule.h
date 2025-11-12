@@ -32,7 +32,7 @@ namespace BCForth
 
 		// ----------------------------------------------------------------------------
 		// Template template parameter 
-		template < typename Base, typename RetType, template < typename > typename RD >
+		template < typename Base, typename RetType, template < typename > typename RD >			// the last "typename" shouldn't it be "class" here? 
 		class RandValGen : public StackOp< Base, RetType >
 		{
 			public:

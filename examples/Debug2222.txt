@@ -1,0 +1,6 @@
+
+\ this is THE SECOND debug test
+
+: XX_XX		deb
+		XX2	; 
+
